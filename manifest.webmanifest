@@ -1,0 +1,16 @@
+{
+  "name": "Shredlog",
+  "short_name": "Shredlog",
+  "description": "Suivi du programme Shred : séances, mensurations, photos, compléments, nutrition.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F4F3F1",
+  "theme_color": "#F28A1D",
+  "lang": "fr",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
