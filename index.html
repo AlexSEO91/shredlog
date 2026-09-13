@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Shredlog</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=7">
+<link rel="icon" href="icons/icon-192.png?v=7">
 <meta name="apple-mobile-web-app-title" content="Shredlog">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -202,7 +202,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
 .zside{display:flex;flex-direction:column;gap:6px;min-height:0}.zside img{flex:1;min-height:0;width:100%;object-fit:contain;background:#111;border-radius:8px}
 .zempty{flex:1;display:flex;align-items:center;justify-content:center;color:#888;background:#111;border-radius:8px}
 .photos button.ph{padding:0;border:0}
-#splash{position:fixed;inset:0;z-index:100;background:#0b0907 center/cover no-repeat;display:flex;align-items:flex-end;justify-content:center;padding-bottom:calc(60px + env(safe-area-inset-bottom));transition:opacity .6s ease}
+#splash{position:fixed;inset:0;z-index:100;background:#0b0907 center 30%/cover no-repeat;display:flex;align-items:flex-end;justify-content:center;padding-bottom:calc(60px + env(safe-area-inset-bottom));transition:opacity .6s ease}
 #splash.off{opacity:0;pointer-events:none}
 #splash .glow{position:absolute;inset:0;background:radial-gradient(ellipse 60% 55% at 50% 42%,rgba(255,150,40,.55),rgba(255,120,20,.18) 45%,transparent 72%);mix-blend-mode:screen;animation:glow 2.6s ease-in-out infinite alternate}
 #splash .name{position:relative;font-family:var(--disp);font-weight:800;font-size:40px;letter-spacing:.06em;color:#fff;text-shadow:0 2px 24px rgba(255,140,30,.8)}
@@ -235,7 +235,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
 </style>
 </head>
 <body>
-<div id="splash" style="background-image:url(img/splash.jpg)"><div class="glow"></div><div class="name">SHREDLOG</div></div>
+<div id="splash" style="background-image:url(img/splash.jpg?v=7)"><div class="glow"></div><div class="name">SHREDLOG</div></div>
 <div class="app">
   <header class="top">
     <div><div class="eyebrow" id="hdr-eyebrow">Shredlog</div><h1 id="hdr-title">Aujourd'hui</h1></div>
@@ -273,9 +273,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="config.js"></script>
-<script src="backend.js?v=6"></script>
-<script src="data.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="backend.js?v=7"></script>
+<script src="data.js?v=7"></script>
+<script src="app.js?v=7"></script>
 <script>if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});</script>
 </body>
 </html>
