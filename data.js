@@ -36,6 +36,8 @@ window.SHRED_DATA = (function () {
     neck_ext_plate: { name: "Extension du cou lestée (disque sur la nuque)", img: "Lying_Face_Down_Plate_Neck_Resistance", primary: ["neck"], secondary: ["traps"], cues: ["Allongé sur le ventre, tête dans le vide", "Disque tenu sur l'arrière du crâne", "Relève la tête en regardant devant, descente lente"] },
     neck_harness: { name: "Cou au harnais (ou machine 4 directions)", img: "Seated_Head_Harness_Neck_Resistance", primary: ["neck"], secondary: ["traps"], cues: ["Harnais + disque ou machine cou de la salle", "Mouvement lent, 12-20 reps, aucune douleur tolérée"] },
     m_seated_calf: { name: "Mollets assis machine (soléaire)", img: "Seated_Calf_Raise", primary: ["calves"], secondary: [], cues: ["Coussin sur les cuisses, étirement complet en bas", "Pause 1 s en haut, tempo lent"] },
+    knees_to_chest: { name: "Étirement lombaires (genoux à la poitrine)", img: "Hug_Knees_To_Chest", primary: ["lower back"], secondary: ["glutes"], cues: ["Allongé sur le dos, ramène les deux genoux contre la poitrine", "Bas du dos qui s'écrase au sol, respire lentement 45 s"] },
+    wall_posture: { name: "Posture debout au mur", img: "Wall_Posture", primary: ["abdominals"], secondary: ["lower back", "glutes"], cues: ["Talons à 5 cm du mur, fesses, omoplates et tête en contact", "Colle le bas du dos au mur en rétroversant le bassin (serre les fessiers)", "Menton rentré, tiens 30 s : c'est la position à retrouver debout dans la journée"] },
     neck_iso: { name: "Cou isométrique 4 directions", img: "Isometric_Neck_Exercise_-_Front_And_Back", img2: "Isometric_Neck_Exercise_-_Sides", primary: ["neck"], secondary: ["traps"], cues: ["Main contre le front, pousse sans bouger : 15-20 s", "Puis arrière, gauche, droite", "Résistance modérée, aucune douleur tolérée"] },
     dead_hang: { name: "Dead hang (suspension)", img: "One_Handed_Hang", primary: ["forearms"], secondary: ["lats", "shoulders"], cues: ["Mains largeur d'épaules, pieds décollés", "Épaules actives (pas complètement relâchées)", "Objectif 30 → 60 → 90 s"] },
 
@@ -198,10 +200,10 @@ window.SHRED_DATA = (function () {
     ],
     posture: [
       { name: "Étirement fléchisseurs de hanche", ex: "hip_flexor_stretch", dur: "45 s / côté" },
-      { name: "Étirement lombaires (genoux à la poitrine)", ex: null, dur: "45 s" },
+      { name: "Étirement lombaires (genoux à la poitrine)", ex: "knees_to_chest", dur: "45 s" },
       { name: "Pont fessier", ex: "glute_bridge", dur: "15 reps" },
       { name: "Dead bug", ex: "dead_bug", dur: "10 / côté" },
-      { name: "Posture debout au mur (bas du dos collé)", ex: null, dur: "30 s" },
+      { name: "Posture debout au mur (bas du dos collé)", ex: "wall_posture", dur: "30 s" },
     ],
   };
 

@@ -188,6 +188,7 @@
   const VIEWS = { home: "Aujourd'hui", session: "Séance", program: "Programme", track: "Suivi", supps: "Compléments", nutrition: "Nutrition", reviews: "Bilan & ajustements", export: "Export / Import", settings: "Réglages", more: "Plus", posture: "Routine posture" };
   function route() {
     const v = (location.hash || "#home").slice(1).split("?")[0];
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const nv = VIEWS[v] ? v : "home"; if (nv !== UI.view) { UI.sheetHtml = null; UI._confirm = null; } UI.view = nv;
     $$(".view").forEach((el) => el.classList.toggle("on", el.id === "v-" + UI.view));
     $$(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.v === UI.view || (UI.view !== "home" && !["session", "track", "nutrition"].includes(UI.view) && a.dataset.v === "more")));
@@ -457,13 +458,15 @@
     const slots = PHOTO_SLOTS.map(([k, lab]) => { const p = doc[k]; return `<div class="ph">${p ? `<img src="${photoUrl(p)}" alt="${lab} ${today}">` : `<span>${lab}<br><span class="tiny">${canUpload ? "toucher pour ajouter" : "upload indisponible hors artifact"}</span></span>`}<span class="badge lab">${lab}</span>${canUpload ? `<input type="file" accept="image/*" data-bind="photo" data-k="${k}" aria-label="Photo ${lab}">` : ""}</div>`; }).join("");
     const dates = all.map((p) => p.date);
     const opt = (sel) => `<option value="">—</option>` + dates.map((d) => `<option value="${d}" ${sel === d ? "selected" : ""}>${fmtDate(d)}</option>`).join("");
-    const cmp = (d) => { const p = d && Store.get("photos/" + d); if (!p) return `<div class="photos">${PHOTO_SLOTS.map(([k, l]) => `<div class="ph"><span>${l}</span></div>`).join("")}</div>`; return `<div class="photos">${PHOTO_SLOTS.map(([k, l]) => `<div class="ph">${p[k] ? `<img src="${photoUrl(p[k])}" alt="${l} ${d}">` : `<span>${l}</span>`}</div>`).join("")}</div>`; };
+    const cmp = (d) => { const p = d && Store.get("photos/" + d); if (!p) return `<div class="photos">${PHOTO_SLOTS.map(([k, l]) => `<div class="ph"><span>${l}</span></div>`).join("")}</div>`; return `<div class="photos">${PHOTO_SLOTS.map(([k, l]) => `<button class="ph" data-act="zoom" data-k="${k}" aria-label="Agrandir ${l}">${p[k] ? `<img src="${photoUrl(p[k])}" alt="${l} ${d}">` : `<span>${l}</span>`}</button>`).join("")}</div>`; };
+    const zoom = UI.zoom ? (() => { const k = UI.zoom; const lab = (PHOTO_SLOTS.find(([x]) => x === k) || [])[1]; const side = (d) => { const p = d && Store.get("photos/" + d); return `<div class="zside"><div class="eyebrow" style="color:#fff">${d ? fmtDate(d) : "—"} · ${lab}</div>${p && p[k] ? `<img src="${photoUrl(p[k])}" alt="${lab} ${d}">` : '<div class="zempty">pas de photo</div>'}</div>`; }; return `<div class="zoom" data-act="zoom-close"><div class="zbar"><span class="eyebrow" style="color:#fff">Comparaison · ${lab}</span><div class="chips">${PHOTO_SLOTS.map(([x, l]) => `<button class="chip ${x === k ? "on" : ""}" data-act="zoom" data-k="${x}">${l}</button>`).join("")}</div><button class="btn sm" style="background:#fff;color:#000" data-act="zoom-close">Fermer</button></div><div class="zgrid">${side(UI.cmpA)}${side(UI.cmpB)}</div></div>`; })() : "";
     const gallery = all.slice(0, 12).map((p) => `<div class="item"><div class="grow"><div class="t">${fmtDate(p.date, true)}</div><div class="s">${PHOTO_SLOTS.filter(([k]) => p[k]).map(([, l]) => l).join(" · ") || "vide"}${p.note ? " · " + esc(p.note) : ""}</div></div><button class="btn sm ghost" data-act="photo-date" data-id="${p.date}">Ouvrir</button></div>`).join("");
     return `
     <div class="card"><div class="row between" style="margin-bottom:10px"><h3>Photos de la semaine</h3><input type="date" value="${today}" style="width:auto" data-bind="p-date"></div>
       <div class="photos">${slots}</div>
       <div class="field" style="margin-top:10px"><label>Ressenti / évolution visible</label><input type="text" value="${esc(doc.note || "")}" data-bind="p-note" placeholder="ventre plus plat, épaules qui ressortent…"></div>
       <p class="tiny faint" style="margin-top:8px">Même lumière, même heure, torse nu. Les photos sont compressées (max 1400 px) puis stockées dans l'artifact.</p></div>
+    ${zoom}
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Comparer deux dates</div>
       <div class="grid2"><select data-bind="cmpA">${opt(UI.cmpA)}</select><select data-bind="cmpB">${opt(UI.cmpB)}</select></div>
       <div class="grid2" style="margin-top:10px">${cmp(UI.cmpA)}${cmp(UI.cmpB)}</div></div>
@@ -609,7 +612,7 @@
     ${window.ShredBackend && window.ShredBackend.configured ? `<div class="card"><h3>Compte</h3>${window.ShredBackend.connected ? `<p class="small muted" style="margin-top:6px">Connecté : ${esc(window.ShredBackend.user ? window.ShredBackend.user.email : "")}</p><button class="btn ghost sm" style="margin-top:8px" data-act="logout">Se déconnecter</button>` : `<p class="small muted" style="margin:6px 0 10px">Identifiants du compte Supabase (créé une seule fois).</p><div class="stack"><input type="email" id="login-email" placeholder="Email" autocomplete="username"><input type="password" id="login-pw" placeholder="Mot de passe" autocomplete="current-password"><button class="btn primary" data-act="login">${UI.loginBusy ? "Connexion…" : "Se connecter"}</button>${UI.loginError ? `<div class="notice red small">${esc(UI.loginError)}</div>` : ""}</div>`}</div>` : ""}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 5 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 6 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
@@ -618,7 +621,7 @@
     return `<div class="card"><div class="list">${items.map(([h, t, s, ic]) => `<a class="item" href="${h}" style="text-decoration:none;color:inherit"><span class="ic" style="color:var(--accent);width:26px">${ic}</span><div class="grow"><div class="t">${t}</div><div class="s">${s}</div></div><span class="chev">›</span></a>`).join("")}</div></div>`;
   }
   function renderPosture() {
-    const p = Data.program(); const items = (p && p.posture) || D.PROGRAM.posture; const today = isoDate(); const log = Store.get("supplementLogs/" + today) || { date: today, taken: {} };
+    const items = D.PROGRAM.posture; const today = isoDate(); const log = Store.get("supplementLogs/" + today) || { date: today, taken: {} };
     return `<div class="card"><p class="small muted">Ta bascule antérieure du bassin vient de 4 facteurs : fléchisseurs de hanche raccourcis, lombaires tendues, fessiers faibles, abdos profonds faibles. 5 minutes, tous les jours, matin ou soir.</p></div>
     ${items.map((it, i) => { const info = it.ex ? Data.exInfo({ ex: it.ex }) : null; return `<div class="card" style="padding:12px"><div class="row between"><div><b>${esc(it.name)}</b><div class="small muted">${esc(it.dur)}</div></div>${checkbox(!!log.taken["posture" + i], "sup-toggle", `data-id="posture${i}"`)}</div>${info && info.img ? `<div style="margin-top:10px">${demoBlock(info, "Posture")}</div>` : ""}</div>`; }).join("")}
     <div class="notice small">Au quotidien : lève-toi toutes les 45 min, menton rentré, poitrine ouverte, fessiers légèrement serrés pour neutraliser le bassin. Téléphone à hauteur des yeux.</div>`;
@@ -670,6 +673,8 @@
       case "save-measure": { const date = $("#m-date").value || isoDate(); const m = { date }; let any = false; D.MEASURE_FIELDS.forEach((f) => { const v = num($("#m-" + f.id).value); if (v != null) { m[f.id] = v; any = true; } }); m.note = $("#m-note").value; if (!any) return toast("Aucune valeur saisie"); Store.set("measurements/" + date, m); toast("Mesures enregistrées"); render(); break; }
       case "del-measure": ask("Supprimer cette mesure ?", fmtDate(id, true), "Supprimer", () => { Store.del("measurements/" + id); render(); }, true); break;
       case "photo-date": UI.pDate = id; render(); break;
+      case "zoom": ev.stopPropagation(); if (!UI.cmpA && !UI.cmpB) { const ds = Data.photos().map((p) => p.date); UI.cmpB = ds[0] || null; UI.cmpA = ds[1] || ds[0] || null; } UI.zoom = b.dataset.k; render(); break;
+      case "zoom-close": if (ev.target.closest("[data-act=zoom]")) break; UI.zoom = null; render(); break;
       case "sup-toggle": { const date = UI.view === "posture" ? isoDate() : UI.supDate; const log = Store.get("supplementLogs/" + date) || { date, taken: {} }; log.taken[id] = !log.taken[id]; Store.set("supplementLogs/" + date, log); render(); break; }
       case "sup-all": { const plan = Data.supplements(); const date = UI.supDate; const log = Store.get("supplementLogs/" + date) || { date, taken: {} }; const items = plan.items.filter((i) => i.moment === b.dataset.m); const allOn = items.every((i) => log.taken[i.id]); items.forEach((i) => (log.taken[i.id] = !allOn)); Store.set("supplementLogs/" + date, log); render(); break; }
       case "sup-info": UI.supOpen = UI.supOpen === id ? null : id; render(); break;
@@ -735,6 +740,8 @@
   window.addEventListener("error", (e) => { UI.lastError = String(e.message || e.error); toast("Erreur : " + UI.lastError); });
   window.addEventListener("unhandledrejection", (e) => { UI.lastError = String((e.reason && (e.reason.message || e.reason.code)) || e.reason); toast("Erreur : " + UI.lastError); });
   /* ───────────────────────── Démarrage ───────────────────────── */
+  const splashStart = Date.now();
+  window.addEventListener("load", () => { const sp = $("#splash"); if (!sp) return; setTimeout(() => { sp.classList.add("off"); setTimeout(() => sp.remove(), 700); }, Math.max(0, 1100 - (Date.now() - splashStart))); });
   Store.loadLocal();
   Data.ensureProgram();
   if (!Store.get("settings/app")) Data.saveSettings(Data.settings());

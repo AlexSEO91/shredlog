@@ -113,6 +113,9 @@ a{color:var(--accent)}
 .check.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .check svg{width:16px;height:16px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid2>*,.grid3>*{min-width:0}
+input[type=date],input[type=time]{min-width:0;-webkit-appearance:none;appearance:none;min-height:44px}
+body{min-height:100dvh}
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .field label{display:block;font-family:var(--disp);font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin-bottom:5px}
 .field .unit{position:relative}
@@ -186,6 +189,19 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
 .spark .gd{stroke:var(--line);stroke-width:1}
 .spark .tx{font-family:var(--disp);font-size:11px;fill:var(--ink3)}
 .spark .pt{fill:var(--accent)}
+.zoom{position:fixed;inset:0;background:#000;z-index:60;display:flex;flex-direction:column;padding:calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom))}
+.zbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.zbar .chip{background:#222;border-color:#444;color:#ddd}.zbar .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.zgrid{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:6px;min-height:0}
+.zside{display:flex;flex-direction:column;gap:6px;min-height:0}.zside img{flex:1;min-height:0;width:100%;object-fit:contain;background:#111;border-radius:8px}
+.zempty{flex:1;display:flex;align-items:center;justify-content:center;color:#888;background:#111;border-radius:8px}
+.photos button.ph{padding:0;border:0}
+#splash{position:fixed;inset:0;z-index:100;background:#0b0907 center/cover no-repeat;display:flex;align-items:flex-end;justify-content:center;padding-bottom:calc(60px + env(safe-area-inset-bottom));transition:opacity .6s ease}
+#splash.off{opacity:0;pointer-events:none}
+#splash .glow{position:absolute;inset:0;background:radial-gradient(ellipse 60% 55% at 50% 42%,rgba(255,150,40,.55),rgba(255,120,20,.18) 45%,transparent 72%);mix-blend-mode:screen;animation:glow 2.6s ease-in-out infinite alternate}
+#splash .name{position:relative;font-family:var(--disp);font-weight:800;font-size:40px;letter-spacing:.06em;color:#fff;text-shadow:0 2px 24px rgba(255,140,30,.8)}
+@keyframes glow{from{opacity:.55;transform:scale(.96)}to{opacity:1;transform:scale(1.06)}}
+@media (prefers-reduced-motion:reduce){#splash .glow{animation:none}}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:14px;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-family:var(--disp);font-weight:600;z-index:50;display:none;box-shadow:var(--shadow)}
 .toast.on{display:block}
 .notice{border-left:3px solid var(--amber);background:var(--amber-soft);padding:10px 12px;border-radius:0 var(--rs) var(--rs) 0;font-size:14px}
@@ -211,6 +227,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
 .reviewchg b{font-family:var(--disp)}
 .hidden{display:none!important}
 </style>
+<div id="splash" style="background-image:url(img/splash.jpg)"><div class="glow"></div><div class="name">SHREDLOG</div></div>
 <div class="app">
   <header class="top">
     <div><div class="eyebrow" id="hdr-eyebrow">Shredlog</div><h1 id="hdr-title">Aujourd'hui</h1></div>
@@ -248,7 +265,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="config.js"></script>
-<script src="backend.js?v=5"></script>
-<script src="data.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="backend.js?v=6"></script>
+<script src="data.js?v=6"></script>
+<script src="app.js?v=6"></script>
 
