@@ -1,6 +1,6 @@
 /* Shredlog — service worker : app disponible hors ligne (coquille + images), données via localStorage + sync. */
-const VERSION = "shredlog-v7";
-const SHELL = ["./", "./index.html", "./app.js?v=7", "./data.js?v=7", "./backend.js?v=7", "./config.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
+const VERSION = "shredlog-v8";
+const SHELL = ["./", "./index.html", "./app.js?v=8", "./data.js?v=8", "./backend.js?v=8", "./config.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== VERSION).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", (e) => {
