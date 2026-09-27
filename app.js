@@ -218,7 +218,10 @@
   const VIEWS = { home: "Aujourd'hui", session: "Séance", program: "Programme", track: "Suivi", supps: "Compléments", stock: "Stock", recount: "Recompter", nutrition: "Nutrition", reviews: "Bilan & ajustements", export: "Export / Import", settings: "Réglages", more: "Plus", posture: "Routine posture" };
   function route() {
     const [v, q] = (location.hash || "#home").slice(1).split("?");
-    if (v === "session" && q && q.startsWith("day=")) UI.sessionDay = decodeURIComponent(q.slice(4));
+    if (v === "session" && q && q.startsWith("day=")) {
+      const id = decodeURIComponent(q.slice(4)); const cur = activeSession();
+      if (cur) { UI.previewDay = id === cur.dayId ? null : id; UI.sessionOverview = true; } else UI.sessionDay = id; // séance en cours : simple consultation
+    }
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const nv = VIEWS[v] ? v : "home"; if (nv !== UI.view) { UI.sheetHtml = null; UI._confirm = null; } UI.view = nv;
     $$(".view").forEach((el) => el.classList.toggle("on", el.id === "v-" + UI.view));
@@ -316,9 +319,20 @@
   }
   function saveSession(s) { Store.set("sessions/" + s.id, s); }
   function activeSession() { return Data.sessions().find((s) => s.status === "in_progress") || null; }
+  // Onglets des jours (écran de choix, ou consultation pendant une séance en cours).
+  function dayChips(selectedId, act, runningId) {
+    return Data.program().days.filter((d) => !d.rest).map((d) => `<button class="chip ${d.id === selectedId ? "on" : ""}" data-act="${act}" data-id="${d.id}">${DAYS_SHORT[d.weekday]} · ${esc(d.name)}${d.id === runningId ? " · ● en cours" : ""}</button>`).join("");
+  }
+  function dayCard(day, badge) {
+    const list = day.exercises.map((e, i) => { const v = e[e.primary] || e.machine || e.dumbbell; const info = Data.exInfo(v); return `<div class="item"><span class="n">${e.warmup ? "éch." : e.block + (e.superset ? "" : "")}</span><div class="grow"><div class="t">${esc(info.name)}</div><div class="s">${e.warmup ? esc(e.reps) : `${e.sets} × ${esc(e.reps)}${v && v.kg != null ? ` · ${fmtK(v.kg)} kg / ${fmtK(v.lbs)} lbs` : v && v.note ? ` · ${esc(v.note)}` : ""}${e.rest ? ` · repos ${e.rest} s` : ""}${e.tempo ? ` · tempo ${esc(e.tempo)}` : ""}`}</div></div></div>`; }).join("");
+    return `<div class="card">
+      <div class="row between"><div><h2>${esc(day.name)}</h2><p class="muted small">${esc(day.focus)} · ~${day.duration} min</p></div>${badge || ""}</div>
+      <div class="list exlist" style="margin-top:10px">${list}</div>
+    </div>`;
+  }
   function renderSession() {
     const s = activeSession();
-    if (s) return UI.sessionOverview ? renderSessionOverview(s) : renderExercise(s);
+    if (s) { if (UI.previewDay && UI.previewDay !== s.dayId && Data.isCurrentDay(UI.previewDay)) return renderDayPreview(s, Data.dayById(UI.previewDay)); UI.previewDay = null; return UI.sessionOverview ? renderSessionOverview(s) : renderExercise(s); }
     const p = Data.program(); if (!p) return `<div class="card">Programme absent. <button class="btn sm primary" data-act="load-default">Charger le programme</button></div>`;
     const today = isoDate(); const wd = parseDate(today).getDay();
     const main = Data.dayByWeekday(wd); const firstDay = p.days.find((d) => !d.rest);
@@ -326,16 +340,20 @@
     const dayId = UI.sessionDay || (main && !main.rest ? main.id : firstDay.id);
     const day = Data.dayById(dayId);
     const doneToday = Data.sessions().find((x) => x.date === today && x.dayId === dayId && x.status === "done");
-    const chips = p.days.filter((d) => !d.rest).map((d) => `<button class="chip ${d.id === dayId ? "on" : ""}" data-act="pick-day" data-id="${d.id}">${DAYS_SHORT[d.weekday]} · ${esc(d.name)}</button>`).join("");
-    const list = day.exercises.map((e, i) => { const v = e[e.primary] || e.machine || e.dumbbell; const info = Data.exInfo(v); return `<div class="item"><span class="n">${e.warmup ? "éch." : e.block + (e.superset ? "" : "")}</span><div class="grow"><div class="t">${esc(info.name)}</div><div class="s">${e.warmup ? esc(e.reps) : `${e.sets} × ${esc(e.reps)}${v && v.kg != null ? ` · ${fmtK(v.kg)} kg / ${fmtK(v.lbs)} lbs` : v && v.note ? ` · ${esc(v.note)}` : ""}${e.rest ? ` · repos ${e.rest} s` : ""}${e.tempo ? ` · tempo ${esc(e.tempo)}` : ""}`}</div></div></div>`; }).join("");
     return `
-    <div class="chips" style="margin-bottom:14px">${chips}</div>
-    <div class="card">
-      <div class="row between"><div><h2>${esc(day.name)}</h2><p class="muted small">${esc(day.focus)} · ~${day.duration} min</p></div>${doneToday ? '<span class="badge acc">faite aujourd\'hui</span>' : ""}</div>
-      <div class="list exlist" style="margin-top:10px">${list}</div>
-    </div>
+    <div class="chips" style="margin-bottom:14px">${dayChips(dayId, "pick-day")}</div>
+    ${dayCard(day, doneToday ? '<span class="badge acc">faite aujourd\'hui</span>' : "")}
     <button class="btn primary wide" data-act="start-session" data-id="${day.id}">${doneToday ? "Refaire la séance" : "Commencer la séance"}</button>
     ${doneToday ? `<p class="tiny faint" style="text-align:center;margin-top:8px">Une nouvelle séance remplacera celle d'aujourd'hui pour ce jour.</p>` : ""}`;
+  }
+  // Consultation d'un autre jour pendant une séance en cours : lecture seule, la séance en cours n'est jamais touchée
+  // (pas de bouton « Commencer » ici : démarrer une séance fermerait celle en cours).
+  function renderDayPreview(s, day) {
+    return `<div class="notice acc small row between" style="margin-bottom:12px"><span><b>${esc(s.dayName)}</b> est en cours · ${sessionProgress(s)} %</span><button class="btn sm primary" data-act="session-back">Revenir à ma séance</button></div>
+    <div class="chips" style="margin-bottom:14px">${dayChips(day.id, "session-preview", s.dayId)}</div>
+    ${dayCard(day, '<span class="badge">consultation</span>')}
+    <p class="tiny muted" style="text-align:center">Consultation seulement : ta séance en cours n'est ni terminée ni abandonnée. Pour faire ce jour-là, termine d'abord la séance en cours.</p>
+    <div class="btnrow" style="margin-top:10px"><a class="btn ghost" href="#program">Programme complet</a><button class="btn primary" data-act="session-back">Revenir à ma séance</button></div>`;
   }
   // Séance en cours : liste des exercices (retour depuis une fiche). Rien n'est perdu en quittant l'écran.
   function renderSessionOverview(s) {
@@ -347,7 +365,9 @@
       const status = se.skipped ? '<span class="badge">passé</span>' : se.warmup ? (se.doneSets ? '<span class="badge acc">✓</span>' : "") : se.doneSets >= se.targetSets ? `<span class="badge acc">✓ ${se.doneSets}/${se.targetSets}</span>` : se.doneSets ? `<span class="badge amber">${se.doneSets}/${se.targetSets}</span>` : "";
       return `<button class="item" style="width:100%;text-align:left${i === s.cursor ? ";background:var(--accent-soft);border-radius:var(--rs)" : ""}" data-act="session-goto" data-i="${i}"><span class="n">${se.warmup ? "éch." : esc(se.block)}</span><div class="grow"><div class="t">${esc(info.name || se.name || se.id)}</div><div class="s">${se.warmup ? esc(se.reps) : `${se.targetSets} × ${esc(se.reps)}`}${i === s.cursor ? " · <b>tu en étais là</b>" : ""}</div></div>${status}<span class="chev">›</span></button>`;
     }).join("");
-    return `<div class="card"><div class="row between"><div><div class="eyebrow">Séance en cours</div><h2 style="margin-top:2px">${esc(s.dayName)}</h2></div><b class="num">${pct} %</b></div><div class="progress" style="margin-top:8px"><i style="width:${pct}%"></i></div>
+    return `<div class="chips" style="margin-bottom:8px">${dayChips(s.dayId, "session-preview", s.dayId)}</div>
+    <p class="tiny muted" style="margin:0 0 12px">Touche un autre jour pour le consulter : ta séance en cours ne sera ni terminée ni abandonnée. <a href="#program" style="color:var(--accent);font-weight:600">Programme complet ›</a></p>
+    <div class="card"><div class="row between"><div><div class="eyebrow">Séance en cours</div><h2 style="margin-top:2px">${esc(s.dayName)}</h2></div><b class="num">${pct} %</b></div><div class="progress" style="margin-top:8px"><i style="width:${pct}%"></i></div>
       <p class="tiny muted" style="margin-top:8px">Chaque saisie est enregistrée au fur et à mesure. Tu peux quitter cet écran ou fermer l'app : la séance reste « en cours » et tu la retrouves ici, là où tu l'as laissée.</p></div>
     <div class="card"><div class="list">${rows}</div></div>
     <button class="btn primary wide" data-act="session-goto" data-i="${s.cursor}">Reprendre : ${esc(curName)}</button>
@@ -778,7 +798,7 @@
     ${pushCard()}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 15 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 16 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
@@ -815,7 +835,7 @@
       case "confirm-ok": { const fn = UI._confirm; UI._confirm = null; closeSheet(); if (fn) fn(); break; }
       case "load-default": Data.ensureProgram(); render(); break;
       case "pick-day": UI.sessionDay = id; render(); break;
-      case "start-session": { const day = Data.dayById(id); const s = newSession(day); Data.sessions().filter((x) => x.status === "in_progress").forEach((x) => { x.status = "abandoned"; x.finishedAt = new Date().toISOString(); saveSession(x); }); UI.cuesOpen = false; UI.summary = null; UI.sessionOverview = false; saveSession(s); render(); break; }
+      case "start-session": { const day = Data.dayById(id); const s = newSession(day); Data.sessions().filter((x) => x.status === "in_progress").forEach((x) => { x.status = "abandoned"; x.finishedAt = new Date().toISOString(); saveSession(x); }); UI.cuesOpen = false; UI.summary = null; UI.sessionOverview = false; UI.previewDay = null; saveSession(s); render(); break; }
       case "variant": withSession((s) => { const se = s.exercises[s.cursor]; const day = Data.dayById(s.dayId); const pe = day && day.exercises.find((e) => e.id === se.id); if (!pe) return; const v = pe[b.dataset.v]; if (!v) return; se.variant = b.dataset.v; se.sets.forEach((st) => { if (!st.done) { st.kg = v.kg; st.lbs = toLbs(v.kg); } }); }); render(); break;
       case "toggle-cues": UI.cuesOpen = !UI.cuesOpen; render(); break;
       case "toggle-set": withSession((s) => { const se = s.exercises[s.cursor]; const i = +b.dataset.i; se.sets[i].done = !se.sets[i].done; se.doneSets = se.sets.filter((x) => x.done).length; }); render(); break;
@@ -827,6 +847,8 @@
       case "rest": if (Timer.running()) Timer.stop(); else Timer.start(+b.dataset.s || 60); break;
       case "ex-prev": withSession((s) => { s.cursor = Math.max(0, s.cursor - 1); }); UI.cuesOpen = false; render(); break;
       case "ex-next": { const s = activeSession(); if (!s) break; if (s.cursor >= s.exercises.length - 1) { finishSession(s); render(); summarySheet(s); } else { s.cursor++; saveSession(s); UI.cuesOpen = false; render(); } break; }
+      case "session-preview": { const cur = activeSession(); UI.previewDay = cur && id === cur.dayId ? null : id; UI.sessionOverview = true; render(); window.scrollTo(0, 0); break; }
+      case "session-back": UI.previewDay = null; UI.sessionOverview = true; render(); window.scrollTo(0, 0); break;
       case "session-overview": flushDebounced(); UI.sessionOverview = true; UI.cuesOpen = false; render(); window.scrollTo(0, 0); break;
       case "session-goto": withSession((s) => { s.cursor = Math.max(0, Math.min(s.exercises.length - 1, +b.dataset.i)); }); UI.sessionOverview = false; UI.cuesOpen = false; render(); window.scrollTo(0, 0); break;
       case "skip-ex": withSession((s) => { const se = s.exercises[s.cursor]; se.skipped = true; if (s.cursor < s.exercises.length - 1) s.cursor++; }); render(); break;
