@@ -22,6 +22,14 @@
     return d % period < on;
   }
 
+  /* Phase d'un complément cyclé à une date : { cycled, on, resume (1er jour ON si OFF), stop (1er jour OFF si ON) }. */
+  function cycleInfo(cycle, date) {
+    const cycled = !!(cycle && cycle.cycleEnabled && cycle.cycleStart && cycle.weeksOn && cycle.weeksOff);
+    const on = isOn(cycle, date); if (!cycled) return { cycled, on };
+    let d = addDays(date, 1); for (let i = 0; i < 800 && isOn(cycle, d) === on; i++) d = addDays(d, 1);
+    return on ? { cycled, on, stop: d } : { cycled, on, resume: d };
+  }
+
   /* Consommation d'une ligne sur une journée, à partir des journaux.
      ctx = { supLog(date) → {taken{}}, nutLog(date) → {meals{}}, nutPlan, cycleOf(itemId) }
      exclude = clés déjà comptées au moment du recomptage (["omega1", "meal:m2"]). */
@@ -109,7 +117,7 @@
     return null;
   }
 
-  const api = { isOn, dayUse, status, recount, countable, orderGroup, nextRecount, addDays, diffDays };
+  const api = { isOn, cycleInfo, dayUse, status, recount, countable, orderGroup, nextRecount, addDays, diffDays };
   root.ShredStock = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

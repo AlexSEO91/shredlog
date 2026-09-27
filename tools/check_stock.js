@@ -114,6 +114,18 @@ ok(S.nextRecount(null, "2026-09-27") === "2026-10-04", "jamais compté → 1er d
   }
   ok(diffs === 0, `date affichée = jour de la notification (${diffs} écart(s) sur 1600 cas)`);
 }
+// Phases de cycle (masquage de la liste du jour, section « En pause »)
+const cyc = (id) => D.SUPPLEMENTS.items.find((i) => i.id === id);
+let ci = S.cycleInfo(cyc("rhodiola"), "2026-09-27");
+ok(ci.cycled && ci.on && ci.stop === "2026-11-09", "Rhodiola le 27/09 : ON, pause le 09/11", ci);
+ci = S.cycleInfo(cyc("rhodiola"), "2026-11-10");
+ok(!ci.on && ci.resume === "2026-11-23" && S.diffDays("2026-11-10", ci.resume) === 13, "Rhodiola le 10/11 : OFF, reprise dans 13 jours (23/11)", ci);
+ci = S.cycleInfo(cyc("tongkat"), "2026-12-20");
+ok(!ci.on && ci.resume === "2026-12-21", "Tongkat le 20/12 : reprise demain", ci);
+ci = S.cycleInfo(cyc("boron"), "2026-12-21");
+ok(ci.on && ci.stop === "2027-02-15", "Boron le 21/12 : reprise, prochaine pause le 15/02/2027", ci);
+ok(!S.cycleInfo(cyc("zinc"), "2026-11-10").cycled && S.cycleInfo(cyc("zinc"), "2026-11-10").on, "non cyclé : toujours ON");
+ok(S.cycleInfo({ ...cyc("rhodiola"), cycleEnabled: false }, "2026-11-10").on, "cycle désactivé : toujours ON");
 // Whey via repas validés
 const nut = { "2026-09-27": { meals: { m1: { eaten: true }, m2: { eaten: true, foods: [{ name: "Whey ISO100", grams: 45 }] } } } };
 ok(S.status(line("whey"), TODAY, ctxWith({}, nut)).unitsLeft === 2100 - 30 - 45, "whey : grammes réels des repas validés");

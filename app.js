@@ -116,6 +116,10 @@
     // Stock : état initial de data.js, remplacé ligne par ligne par stock/<id> dès qu'il existe en base.
     stockLines() { const ids = new Set(D.STOCK.map((l) => l.id)); const extra = Store.list("stock").filter((x) => !ids.has(x.id)).map((x) => x.data); return D.STOCK.map((l) => ({ ...clone(l), ...(Store.get("stock/" + l.id) || {}) })).concat(extra); },
     stockCtx() { const plan = this.supplements(); const def = Object.fromEntries(D.SUPPLEMENTS.items.map((i) => [i.id, i])); return { supLog: (d) => Store.get("supplementLogs/" + d), nutLog: (d) => Store.get("nutritionLogs/" + d), nutPlan: this.nutrition(), cycleOf: (id) => { const i = plan.items.find((x) => x.id === id); return i && i.cycleStart ? i : def[id] || null; } }; },
+    cycleOf(id) { return this.stockCtx().cycleOf(id); },
+    // Liste du jour : les compléments en phase OFF n'y figurent pas (ils sont « en pause »).
+    activeItems(date = isoDate()) { return this.supplements().items.filter((i) => window.ShredStock.isOn(this.cycleOf(i.id), date)); },
+    pausedItems(date = isoDate()) { return this.supplements().items.map((i) => ({ item: i, cyc: window.ShredStock.cycleInfo(this.cycleOf(i.id), date) })).filter((x) => !x.cyc.on); },
     stock(today = isoDate()) { const ctx = this.stockCtx(); return this.stockLines().map((l) => ({ line: l, st: window.ShredStock.status(l, today, ctx) })).sort((a, b) => (a.st.rupture || "9999") < (b.st.rupture || "9999") ? -1 : (a.st.rupture || "9999") > (b.st.rupture || "9999") ? 1 : 0); },
     saveStock(line) { Store.set("stock/" + line.id, line); },
     nutrition() { return Store.get("nutrition/plan") || D.NUTRITION; },
@@ -254,7 +258,7 @@
     const active = Data.sessions().find((s) => s.status === "in_progress");
     const doneToday = Data.sessions().find((s) => s.date === today && s.status === "done");
     const unseen = Data.unseenReviews();
-    const sup = Data.supplements(); const supLog = Store.get("supplementLogs/" + today) || { taken: {} };
+    const sup = { items: Data.activeItems(today) }; const supLog = Store.get("supplementLogs/" + today) || { taken: {} };
     const supDone = sup.items.filter((i) => supLog.taken[i.id]).length;
     const neck = Data.neckByWeekday(wd); const neckDone = neck && Data.sessions().find((s) => s.date === today && s.dayId === neck.id && s.status === "done");
     const lastM = Data.measurements().slice(-1)[0]; const lastP = Data.photos()[0];
@@ -474,8 +478,9 @@
     const nameOf = (e) => { const day = Data.dayById(e.session.dayId); const pe = day && day.exercises.find((x) => x.id === e.id); const info = pe ? Data.exInfo(pe[e.variant]) : null; return info ? info.name : e.id; };
     const volume = exs.reduce((a, e) => a + e.sets.filter((x) => x.done).reduce((b, x) => b + (x.kg || 0) * (parseInt(x.reps, 10) || 0), 0), 0);
     const m = Data.measurements().filter((x) => x.date >= start && x.date <= end);
-    const sup = Store.list("supplementLogs").map((x) => x.data).filter((l) => l.date >= start && l.date <= end); const plan = Data.supplements();
-    const supPct = sup.length ? Math.round(100 * sup.reduce((a, l) => a + plan.items.filter((i) => l.taken[i.id]).length, 0) / (sup.length * plan.items.length)) : null;
+    const sup = Store.list("supplementLogs").map((x) => x.data).filter((l) => l.date >= start && l.date <= end);
+    const supDue = sup.reduce((a, l) => a + Data.activeItems(l.date).length, 0);
+    const supPct = sup.length && supDue ? Math.round(100 * sup.reduce((a, l) => a + Data.activeItems(l.date).filter((i) => l.taken[i.id]).length, 0) / supDue) : null;
     const plannedSets = planned.reduce((a, d) => a + d.exercises.filter((e) => !e.warmup).reduce((b, e) => b + e.sets, 0), 0);
     const doneSets = exs.reduce((a, e) => a + Math.min(e.doneSets, e.targetSets), 0);
     const setPct = plannedSets ? Math.round(100 * doneSets / plannedSets) : 0;
@@ -538,15 +543,19 @@
   /* ───────────────────────── Compléments ───────────────────────── */
   function renderSupps() {
     const plan = Data.supplements(); const date = UI.supDate; const log = Store.get("supplementLogs/" + date) || { date, taken: {} };
-    const done = plan.items.filter((i) => log.taken[i.id]).length;
-    const groups = plan.moments.map((m) => { const items = plan.items.filter((i) => i.moment === m.id); if (!items.length) return ""; const allOn = items.every((i) => log.taken[i.id]);
+    const active = Data.activeItems(date); const paused = Data.pausedItems(date);
+    const done = active.filter((i) => log.taken[i.id]).length;
+    const phase = (i) => { const c = window.ShredStock.cycleInfo(Data.cycleOf(i.id), date); return c.cycled && c.stop ? ` · pause le ${fmtDate(c.stop)}` : ""; };
+    const groups = plan.moments.map((m) => { const items = active.filter((i) => i.moment === m.id); if (!items.length) return ""; const allOn = items.every((i) => log.taken[i.id]);
       return `<div class="card" style="padding:12px 14px"><div class="row between" style="margin-bottom:4px"><div><b>${esc(m.label)}</b> <span class="tiny faint">${esc(m.time || "")}</span></div><button class="btn sm ${allOn ? "ghost" : "primary"}" data-act="sup-all" data-m="${m.id}">${allOn ? "Tout décocher" : "Tout pris"}</button></div>
-        ${items.map((i) => `<div class="sup ${UI.supOpen === i.id ? "open" : ""}">${checkbox(!!log.taken[i.id], "sup-toggle", `data-id="${i.id}"`)}<div class="grow"><button style="text-align:left;width:100%" data-act="sup-info" data-id="${i.id}"><div class="t">${esc(i.name)} <span class="tiny faint">ⓘ</span>${i.fat ? ' <span class="badge amber" title="avec un repas gras">gras</span>' : ""}${i.cycle ? ` <span class="badge">${esc(i.cycle)}</span>` : ""}</div><div class="s">${esc(i.dose)} · ${esc(i.brand)}</div></button><div class="why">${esc(i.why)}</div></div></div>`).join("")}</div>`; }).join("");
+        ${items.map((i) => `<div class="sup ${UI.supOpen === i.id ? "open" : ""}">${checkbox(!!log.taken[i.id], "sup-toggle", `data-id="${i.id}"`)}<div class="grow"><button style="text-align:left;width:100%" data-act="sup-info" data-id="${i.id}"><div class="t">${esc(i.name)} <span class="tiny faint">ⓘ</span>${i.fat ? ' <span class="badge amber" title="avec un repas gras">gras</span>' : ""}${i.cycle ? ` <span class="badge">${esc(i.cycle)}</span>` : ""}</div><div class="s">${esc(i.dose)} · ${esc(i.brand)}${phase(i)}</div></button><div class="why">${esc(i.why)}</div></div></div>`).join("")}</div>`; }).join("");
     const toOrder = stockToOrder().length;
     return `
     <a href="#stock" class="card row between" style="text-decoration:none;color:inherit;padding:12px 14px"><div><b>Stock</b><div class="small muted">${toOrder ? `<span style="color:var(--red);font-weight:600">${toOrder} à commander</span>` : "rien à commander"}</div></div><span class="chev">›</span></a>
-    <div class="card"><div class="row between"><div><div class="eyebrow">Prises du jour</div><div class="big">${done}<span style="font-size:22px;color:var(--ink3)">/${plan.items.length}</span></div></div><input type="date" value="${date}" style="width:auto" data-bind="sup-date"></div><div class="progress" style="margin-top:8px"><i style="width:${Math.round(100 * done / plan.items.length)}%"></i></div></div>
+    <div class="card"><div class="row between"><div><div class="eyebrow">Prises du jour</div><div class="big">${done}<span style="font-size:22px;color:var(--ink3)">/${active.length}</span></div></div><input type="date" value="${date}" style="width:auto" data-bind="sup-date"></div><div class="progress" style="margin-top:8px"><i style="width:${Math.round(100 * done / Math.max(1, active.length))}%"></i></div></div>
     ${groups}
+    ${paused.length ? `<div class="card" style="padding:12px 14px"><button class="row between" style="width:100%;text-align:left" data-act="sup-paused" aria-expanded="${!!UI.pausedOpen}"><div><b>En pause</b> <span class="badge">${paused.length}</span><div class="small muted">${paused.map((x) => esc(x.item.name)).join(", ")}</div></div><span class="chev" style="transform:rotate(${UI.pausedOpen ? 90 : 0}deg)">›</span></button>
+      ${UI.pausedOpen ? paused.map(({ item: i, cyc }) => { const n = window.ShredStock.diffDays(date, cyc.resume); return `<div class="item" style="margin-top:8px"><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.cycle || "")} · phase OFF</div></div><div style="text-align:right"><b>reprise dans ${n} jour${n > 1 ? "s" : ""}</b><div class="tiny muted">${fmtDate(cyc.resume)}</div></div></div>`; }).join("") : ""}</div>` : ""}
     <div class="notice small">Règles : Zinc et Magnésium séparés de 2 h · liposolubles (D3+K2, CoQ10, Oméga-3, Astaxanthine) avec ≥ 10 g de gras · Tongkat + Boron 8 sem ON / 4 OFF · Rhodiola 6 ON / 2 OFF, jamais le soir · 3-4 L d'eau/jour.</div>`;
   }
 
@@ -642,14 +651,14 @@
       out.push({ date: s.date, seance: s.dayName, statut: s.status, exercice: info ? info.name : e.id, variante: e.variant, bloc: e.block, series_prevues: e.targetSets, series_faites: e.doneSets, reps_prevues: e.reps, reps_faites: done.map((x) => x.reps).join("/"), charge_kg: kgs.length ? Math.max(...kgs) : "", charge_lbs: kgs.length ? toLbs(Math.max(...kgs)) : "", difficulte: e.difficulty, douleur: e.pain ? "oui" : "", passe: e.skipped ? "oui" : "", note: e.note, note_seance: s.note || "" }); }); }); return out;
   }
   function measureRows() { const s = Data.settings(); return Data.measurements().map((m) => { const o = { date: m.date }; D.MEASURE_FIELDS.forEach((f) => (o[f.id] = m[f.id] ?? "")); o.masse_grasse_estimee = navyBF(m.waistRelaxed, m.neck, s.heightCm) ?? ""; o.note = m.note || ""; return o; }); }
-  function suppRows() { const plan = Data.supplements(); return Store.list("supplementLogs").map((x) => x.data).map((l) => ({ date: l.date, pris: plan.items.filter((i) => l.taken[i.id]).length, total: plan.items.length, manques: plan.items.filter((i) => !l.taken[i.id]).map((i) => i.name).join(", ") })); }
+  function suppRows() { return Store.list("supplementLogs").map((x) => x.data).map((l) => { const act = Data.activeItems(l.date); const off = Data.pausedItems(l.date); return { date: l.date, pris: act.filter((i) => l.taken[i.id]).length, total: act.length, manques: act.filter((i) => !l.taken[i.id]).map((i) => i.name).join(", "), en_pause: off.map((x) => x.item.name).join(", ") }; }); }
   function nutritionRows() { const plan = Data.nutrition(); return Store.list("nutritionLogs").map((x) => x.data).map((l) => { const rows = dayFoods(plan, l); const tot = mealTotals(rows.filter((r) => r.eaten).flatMap((r) => r.foods)); return { date: l.date, repas_valides: rows.filter((r) => r.eaten).length, repas_prevus: rows.length, kcal: Math.round(tot.kcal), proteines: Math.round(tot.protein), glucides: Math.round(tot.carbs), lipides: Math.round(tot.fat), cible_kcal: plan.targets.kcal, cible_prot: plan.targets.protein }; }); }
   function aiSummary(weekOff) {
     if (weekOff != null) { const w = weekStats(weekOff); const s = Data.settings(); const lines = [`# Shredlog — bilan semaine ${w.start} → ${w.end}`, `Programme réalisé : ${w.setPct} % (${w.doneSets}/${w.plannedSets} séries) · Séances : ${w.sessions.length}/${w.planned.length}${w.missed.length ? " (manquées : " + w.missed.map((d) => d.name).join(", ") + ")" : ""} · volume ${Math.round(w.volume)} kg×reps · compléments ${w.supPct == null ? "–" : w.supPct + " %"}`, ""]; w.sessions.forEach((x) => { lines.push(`## ${x.date} — ${x.dayName} (${sessionProgress(x)} %)`); x.exercises.filter((e) => !e.warmup).forEach((e) => { const done = e.sets.filter((q) => q.done); lines.push(`- ${w.nameOf({ ...e, session: x })} [${e.variant}] : ${e.doneSets}/${e.targetSets} séries, ${done.map((q) => `${q.kg != null ? q.kg + "kg" : "PDC"}×${q.reps}`).join(" ") || "–"}${e.difficulty ? " · " + e.difficulty : ""}${e.pain ? " · DOULEUR" : ""}${e.skipped ? " · passé" : ""}${e.note ? " · " + e.note : ""}`); }); }); if (w.m.length) { lines.push("", "## Mesures"); w.m.forEach((m) => lines.push(`- ${m.date} : ${fmtK(m.weight)} kg, taille ${fmtK(m.waistRelaxed)} cm, cou ${fmtK(m.neck)}, MG est. ${fmtK(navyBF(m.waistRelaxed, m.neck, s.heightCm))} %`)); } return lines.join("\n"); }
     const s = Data.settings(); const ms = Data.measurements(); const last = ms[ms.length - 1]; const sessions = Data.sessions().filter((x) => x.status === "done").slice(0, 10);
     const lines = [`# Shredlog — résumé pour l'IA (${fmtDate(isoDate(), true)})`, `Profil : ${s.name}, ${s.heightCm} cm, objectif shred (~12 % MG) + volume haut du corps + posture. Programme v${Data.program() ? Data.program().version : "?"}.`, "", "## Dernières mensurations", ...ms.slice(-4).map((m) => `- ${m.date} : poids ${fmtK(m.weight)} kg, taille ${fmtK(m.waistRelaxed)} cm, cou ${fmtK(m.neck)}, bras D ${fmtK(m.armR)}, MG est. ${fmtK(navyBF(m.waistRelaxed, m.neck, s.heightCm))} %${m.note ? " — " + m.note : ""}`), "", "## 10 dernières séances"];
     sessions.forEach((x) => { const day = Data.dayById(x.dayId); lines.push(`### ${x.date} — ${x.dayName} (${sessionProgress(x)} %)`); x.exercises.filter((e) => !e.warmup).forEach((e) => { const pe = day && day.exercises.find((q) => q.id === e.id); const info = pe ? Data.exInfo(pe[e.variant]) : null; const done = e.sets.filter((q) => q.done); lines.push(`- ${info ? info.name : e.id} [${e.variant}] : ${e.doneSets}/${e.targetSets} séries, ${done.map((q) => `${q.kg != null ? q.kg + "kg" : "PDC"}×${q.reps}`).join(" ") || "–"}${e.difficulty ? " · " + e.difficulty : ""}${e.pain ? " · DOULEUR" : ""}${e.skipped ? " · passé" : ""}${e.note ? " · " + e.note : ""}`); }); });
-    const sr = suppRows().slice(-7); if (sr.length) { lines.push("", "## Compléments (7 derniers jours)"); sr.forEach((r) => lines.push(`- ${r.date} : ${r.pris}/${r.total}${r.manques ? " (manqués : " + r.manques + ")" : ""}`)); }
+    const sr = suppRows().slice(-7); if (sr.length) { lines.push("", "## Compléments (7 derniers jours)"); sr.forEach((r) => lines.push(`- ${r.date} : ${r.pris}/${r.total}${r.manques ? " (manqués : " + r.manques + ")" : ""}${r.en_pause ? " · en pause (cycle) : " + r.en_pause : ""}`)); }
     const nr = nutritionRows().slice(-7); if (nr.length) { lines.push("", "## Nutrition (7 derniers jours)"); nr.forEach((r) => lines.push(`- ${r.date} : ${r.kcal} kcal, P ${r.proteines} g (cible ${r.cible_kcal} / ${r.cible_prot})`)); }
     return lines.join("\n");
   }
@@ -752,7 +761,7 @@
     ${pushCard()}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 13 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 14 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
@@ -816,7 +825,8 @@
       case "zoom": ev.stopPropagation(); if (!UI.cmpA && !UI.cmpB) { const ds = Data.photos().map((p) => p.date); UI.cmpB = ds[0] || null; UI.cmpA = ds[1] || ds[0] || null; } UI.zoom = b.dataset.k; render(); break;
       case "zoom-close": if (ev.target.closest("[data-act=zoom]")) break; UI.zoom = null; render(); break;
       case "sup-toggle": { const date = UI.view === "posture" ? isoDate() : UI.supDate; const log = Store.get("supplementLogs/" + date) || { date, taken: {} }; log.taken[id] = !log.taken[id]; Store.set("supplementLogs/" + date, log); render(); break; }
-      case "sup-all": { const plan = Data.supplements(); const date = UI.supDate; const log = Store.get("supplementLogs/" + date) || { date, taken: {} }; const items = plan.items.filter((i) => i.moment === b.dataset.m); const allOn = items.every((i) => log.taken[i.id]); items.forEach((i) => (log.taken[i.id] = !allOn)); Store.set("supplementLogs/" + date, log); render(); break; }
+      case "sup-all": { const plan = Data.supplements(); const date = UI.supDate; const log = Store.get("supplementLogs/" + date) || { date, taken: {} }; const items = Data.activeItems(date).filter((i) => i.moment === b.dataset.m); const allOn = items.every((i) => log.taken[i.id]); items.forEach((i) => (log.taken[i.id] = !allOn)); Store.set("supplementLogs/" + date, log); render(); break; }
+      case "sup-paused": UI.pausedOpen = !UI.pausedOpen; render(); break;
       case "sup-info": UI.supOpen = UI.supOpen === id ? null : id; render(); break;
       case "stock-group-ordered": { const g = stockGroup(); const ids = new Set(g.anchors.concat(g.extras).map((x) => x.line.id)); const today = isoDate(); Data.stockLines().filter((l) => ids.has(l.id)).forEach((l) => Data.saveStock({ ...l, orderedAt: today })); toast(`${ids.size} compléments marqués commandés · rappels suspendus`); render(); break; }
       case "stock-ordered": { const l = Data.stockLines().find((x) => x.id === id); if (!l) break; l.orderedAt = l.orderedAt ? null : isoDate(); Data.saveStock(l); toast(l.orderedAt ? `${l.name} : commandé, rappels suspendus` : `${l.name} : rappels réactivés`); render(); break; }
