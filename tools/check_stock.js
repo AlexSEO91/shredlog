@@ -97,6 +97,23 @@ supM["2026-09-28"].taken.omega2 = true;
 ok(S.status(same, "2026-09-28", ctxWith(supM)).unitsLeft === before.unitsLeft - 1, "prise cochée après « Tout est juste » : décomptée");
 // Boron 1 cap/j, cycle 8/4 : 57 caps jusqu'au 22/11, OFF 23/11 → 20/12, 28 jours de reprise → rupture 18/01/2027
 ok(S.status(line("boron"), TODAY, ctx0).rupture === "2027-01-18", "Boron 1 cap/j : rupture 18/01/2027 (pause sautée)");
+// Prochain recomptage = jour de la notification
+ok(S.nextRecount("2026-09-27", "2026-09-27") === "2026-10-04", "compté le 27/09 → prochain le 04/10 (1er dimanche d'octobre)");
+ok(S.nextRecount("2026-10-01", "2026-10-02") === "2026-11-01", "compté le 01/10 → le 04/10 est trop proche → 01/11");
+ok(S.nextRecount("2026-10-04", "2026-10-04") === "2026-11-01", "recompté le jour même → mois suivant");
+ok(S.nextRecount(null, "2026-09-27") === "2026-10-04", "jamais compté → 1er dimanche suivant");
+{ // Équivalence avec la règle de l'Edge Function déployée (notify.js, mode weekly) sur 400 jours × plusieurs dates de comptage
+  global.window = window; const N = require(require("path").join(ROOT, "supabase/functions/shredlog-notify/notify.js"));
+  let diffs = 0;
+  for (const counted of ["2026-09-27", "2026-10-01", "2026-10-30", "2026-11-29"]) {
+    const docs = Object.fromEntries(D.STOCK.map((l) => ["stock/" + l.id, { ...l, lastCountedAt: counted }]));
+    for (let d = counted, i = 0; i < 400; d = S.addDays(d, 1), i++) {
+      const notif = N.plan({ mode: "weekly", today: d, docs, logs: {}, D, S }).messages.some((m) => m.tag === "recount");
+      if (notif !== (S.nextRecount(counted, d) === d)) diffs++;
+    }
+  }
+  ok(diffs === 0, `date affichée = jour de la notification (${diffs} écart(s) sur 1600 cas)`);
+}
 // Whey via repas validés
 const nut = { "2026-09-27": { meals: { m1: { eaten: true }, m2: { eaten: true, foods: [{ name: "Whey ISO100", grams: 45 }] } } } };
 ok(S.status(line("whey"), TODAY, ctxWith({}, nut)).unitsLeft === 2100 - 30 - 45, "whey : grammes réels des repas validés");

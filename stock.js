@@ -100,7 +100,16 @@
     return { anchors, extras };
   }
 
-  const api = { isOn, dayUse, status, recount, countable, orderGroup, addDays, diffDays };
+  /* Prochain recomptage = date de la notification « Recompte tes boîtes » : 1er dimanche du mois (21h Bangkok),
+     à condition que le plus ancien comptage ait au moins 7 jours ce jour-là. */
+  function nextRecount(counted, today) {
+    for (let d = today, i = 0; i < 70; d = addDays(d, 1), i++) {
+      if (parse(d).getUTCDay() === 0 && Number(d.slice(8)) <= 7 && (!counted || diffDays(counted, d) >= 7)) return d;
+    }
+    return null;
+  }
+
+  const api = { isOn, dayUse, status, recount, countable, orderGroup, nextRecount, addDays, diffDays };
   root.ShredStock = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
