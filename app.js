@@ -201,6 +201,7 @@
     $("#hdr-eyebrow").textContent = UI.view === "home" ? "Shredlog" : "Shredlog · " + (Data.settings().name || "");
     window.scrollTo(0, 0);
     render();
+    if (UI.view === "settings") { UI.pushMsg = ""; Push.refresh(); }
   }
   function render() {
     const t = isoDate(); $("#hdr-date").textContent = fmtDate(t, true);
@@ -645,6 +646,49 @@
   }
 
   /* ───────────────────────── Réglages / Plus / Posture ───────────────────────── */
+  /* ───────────────────────── Notifications push ───────────────────────── */
+  const Push = {
+    key: () => (window.SHRED_CONFIG || {}).vapidPublicKey,
+    ios: () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1),
+    standalone: () => (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true,
+    async state() {
+      const B = window.ShredBackend; if (!B || !B.configured) return "no-backend";
+      if (!B.connected) return "no-login";
+      if (this.ios() && !this.standalone()) return "not-installed";
+      if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return "unsupported";
+      if (!this.key()) return "no-key";
+      if (Notification.permission === "denied") return "denied";
+      const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && (await reg.pushManager.getSubscription());
+      return sub && Notification.permission === "granted" ? "on" : "off";
+    },
+    async refresh() { const st = await this.state().catch(() => "unsupported"); if (st !== UI.pushState) { UI.pushState = st; if (UI.view === "settings") render(); } },
+    bytes(b64url) { const b64 = (b64url + "=".repeat((4 - (b64url.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"); const raw = atob(b64); const out = new Uint8Array(raw.length); for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i); return out; },
+    // Après l'autorisation (demandée dans le gestionnaire du tap) : abonnement, enregistrement, puis rattrapage immédiat.
+    async subscribe() {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: this.bytes(this.key()) }));
+      const j = sub.toJSON();
+      await window.ShredBackend.savePushSub({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, user_agent: navigator.userAgent.slice(0, 200) });
+      return window.ShredBackend.invoke("shredlog-notify", { mode: "catchup" });
+    },
+    async unsubscribe() { const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && (await reg.pushManager.getSubscription()); if (!sub) return; await window.ShredBackend.deletePushSub(sub.endpoint); await sub.unsubscribe(); },
+  };
+  function pushCard() {
+    const st = UI.pushState; if (!st || st === "no-backend") return "";
+    const msg = UI.pushMsg ? `<div class="notice ${/^Erreur|refus/i.test(UI.pushMsg) ? "red" : "acc"} small" style="margin-top:10px">${esc(UI.pushMsg)}</div>` : "";
+    const text = {
+      "no-login": "Connecte-toi d'abord (carte Compte ci-dessus).",
+      "not-installed": "Sur iPhone, les notifications ne fonctionnent que depuis l'app installée : dans Safari, bouton Partager → « Sur l'écran d'accueil », puis ouvre Shredlog depuis l'icône et reviens ici.",
+      unsupported: "Ce navigateur ne gère pas les notifications push.",
+      "no-key": "Clé VAPID publique absente de config.js.",
+      denied: "Notifications refusées. Pour les rétablir : Réglages de l'iPhone → Notifications → Shredlog → Autoriser.",
+      off: "Rappels : stock à commander (08h00), cycles, séance non enregistrée (20h30), bloc cou du mercredi (07h30), mensurations et recomptage du dimanche (21h00).",
+      on: "Activées sur cet appareil.",
+    }[st] || "";
+    const btns = st === "off" ? `<button class="btn primary wide" style="margin-top:10px" data-act="push-enable" ${UI.pushBusy ? "disabled" : ""}>${UI.pushBusy ? "Activation…" : "Activer les notifications"}</button>`
+      : st === "on" ? `<div class="btnrow" style="margin-top:10px"><button class="btn ghost" data-act="push-test" ${UI.pushBusy ? "disabled" : ""}>Envoyer un test</button><button class="btn line" data-act="push-disable" ${UI.pushBusy ? "disabled" : ""}>Désactiver</button></div>` : "";
+    return `<div class="card"><h3>Notifications</h3><p class="small muted" style="margin-top:6px">${text}</p>${btns}${msg}</div>`;
+  }
   function renderSettings() {
     const s = Data.settings();
     return `<div class="card"><div class="stack">
@@ -653,9 +697,10 @@
       <div class="field"><label>Thème</label><div class="tabs">${["auto", "light", "dark"].map((t) => `<button class="${s.theme === t ? "on" : ""}" data-act="set-theme" data-v="${t}">${{ auto: "Auto", light: "Clair", dark: "Sombre" }[t]}</button>`).join("")}</div></div>
     </div></div>
     ${window.ShredBackend && window.ShredBackend.configured ? `<div class="card"><h3>Compte</h3>${window.ShredBackend.connected ? `<p class="small muted" style="margin-top:6px">Connecté : ${esc(window.ShredBackend.user ? window.ShredBackend.user.email : "")}</p><button class="btn ghost sm" style="margin-top:8px" data-act="logout">Se déconnecter</button>` : `<p class="small muted" style="margin:6px 0 10px">Identifiants du compte Supabase (créé une seule fois).</p><div class="stack"><input type="email" id="login-email" placeholder="Email" autocomplete="username"><input type="password" id="login-pw" placeholder="Mot de passe" autocomplete="current-password"><button class="btn primary" data-act="login">${UI.loginBusy ? "Connexion…" : "Se connecter"}</button>${UI.loginError ? `<div class="notice red small">${esc(UI.loginError)}</div>` : ""}</div>`}</div>` : ""}
+    ${pushCard()}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 9 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 10 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
@@ -755,8 +800,18 @@
       case "exp-summary": copyText(aiSummary(b.dataset.week != null ? +b.dataset.week : null)); break;
       case "imp-program": importJSON($("#imp-json").value, $("#imp-reason").value); render(); break;
       case "set-theme": { const s = Data.settings(); s.theme = b.dataset.v; Data.saveSettings(s); applyTheme(); render(); break; }
-      case "login": { const em = $("#login-email").value.trim(), pw = $("#login-pw").value; if (!em || !pw) { UI.loginError = "Email et mot de passe requis."; render(); break; } UI.loginBusy = true; UI.loginError = ""; b.textContent = "Connexion…"; try { await window.ShredBackend.login(em, pw); UI.loginBusy = false; toast("Connecté"); await Store.connectSupabase(); afterConnect(); Store.updateBanner(); render(); } catch (e) { UI.loginBusy = false; UI.loginError = "Connexion refusée : " + (e.message === "Invalid login credentials" ? "email ou mot de passe incorrect." : e.message); render(); const el = $("#login-email"); if (el) el.value = em; } break; }
-      case "logout": window.ShredBackend.logout(); Store.db = null; Store.needLogin = true; Store.updateBanner(); render(); break;
+      case "login": { const em = $("#login-email").value.trim(), pw = $("#login-pw").value; if (!em || !pw) { UI.loginError = "Email et mot de passe requis."; render(); break; } UI.loginBusy = true; UI.loginError = ""; b.textContent = "Connexion…"; try { await window.ShredBackend.login(em, pw); UI.loginBusy = false; toast("Connecté"); await Store.connectSupabase(); afterConnect(); Store.updateBanner(); render(); Push.refresh(); } catch (e) { UI.loginBusy = false; UI.loginError = "Connexion refusée : " + (e.message === "Invalid login credentials" ? "email ou mot de passe incorrect." : e.message); render(); const el = $("#login-email"); if (el) el.value = em; } break; }
+      case "push-enable": {
+        // iOS : requestPermission() doit partir directement de ce tap, avant tout autre await.
+        let perm; try { perm = await Notification.requestPermission(); } catch (e) { perm = "default"; }
+        if (perm !== "granted") { UI.pushMsg = "Autorisation refusée. Réglages de l'iPhone → Notifications → Shredlog pour la rétablir."; await Push.refresh(); render(); break; }
+        UI.pushBusy = true; UI.pushMsg = ""; render();
+        try { const r = await Push.subscribe(); const rep = (r.report || [])[0] || {}; UI.pushMsg = rep.sent ? `Activées. Rattrapage envoyé : ${(rep.messages || []).join(", ")}.` : "Activées. Rien en alerte pour l'instant."; }
+        catch (e) { UI.pushMsg = "Erreur : " + e.message; }
+        UI.pushBusy = false; await Push.refresh(); render(); break; }
+      case "push-test": { UI.pushBusy = true; render(); try { const r = await window.ShredBackend.invoke("shredlog-notify", { mode: "test" }); const rep = (r.report || [])[0] || {}; UI.pushMsg = rep.sent ? "Test envoyé : il doit arriver dans quelques secondes." : "Erreur : aucun appareil n'a reçu le test" + (rep.errors && rep.errors.length ? " (" + rep.errors.join(" | ") + ")" : "") + "."; } catch (e) { UI.pushMsg = "Erreur : " + e.message; } UI.pushBusy = false; render(); break; }
+      case "push-disable": { UI.pushBusy = true; render(); try { await Push.unsubscribe(); UI.pushMsg = "Désactivées sur cet appareil."; } catch (e) { UI.pushMsg = "Erreur : " + e.message; } UI.pushBusy = false; await Push.refresh(); render(); break; }
+      case "logout": window.ShredBackend.logout(); Store.db = null; Store.needLogin = true; Store.updateBanner(); render(); Push.refresh(); break;
       case "resync": Store.pending = new Set(Object.keys(Store.docs)); Store.saveLocal(); await Store.flush(); toast("Synchronisation lancée"); break;
       case "reset-local": ask("Vider le cache local ?", "Les données non encore synchronisées seraient perdues.", "Vider", () => { localStorage.removeItem("shredlog.docs"); localStorage.removeItem("shredlog.pending"); location.reload(); }, true); break;
     }
@@ -794,6 +849,8 @@
   $("#timer-stop").addEventListener("click", () => Timer.stop());
   $("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") closeSheet(); });
   window.addEventListener("hashchange", route);
+  // Tap sur une notification alors que l'app est ouverte : le service worker envoie la destination.
+  if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.nav) location.hash = e.data.nav; });
 
   window.addEventListener("error", (e) => { UI.lastError = String(e.message || e.error); toast("Erreur : " + UI.lastError); });
   window.addEventListener("unhandledrejection", (e) => { UI.lastError = String((e.reason && (e.reason.message || e.reason.code)) || e.reason); toast("Erreur : " + UI.lastError); });
@@ -807,13 +864,13 @@
   Store.onChange(() => { if (UI.view !== "session" || !activeSession()) render(); else { $("#more-dot").classList.toggle("hidden", Data.unseenReviews() === 0); } Store.updateBanner(); });
   route();
   Store.updateBanner();
-  const GUIDE = { purpose: "Schéma de la base Shredlog pour une IA", collections: { "program/current": "programme actif : days[].exercises[] {id, block, sets, reps, rest, primary, machine{ex,kg,lbs,note}, dumbbell{...}}. ex = clé de la bibliothèque (voir data.js) ou custom{name,cues}", "programVersions/vN": "copie de chaque version + savedAt + reason", "sessions/<date>_<dayId>": "séance : status in_progress|done|abandoned, exercises[] {id, variant, targetSets, doneSets, sets[]{kg,lbs,reps,done}, difficulty facile|moyen|difficile, pain, note, skipped}", "measurements/<date>": "poids kg, tours en cm (waistRelaxed, neck, chest, armR...), bodyFat %", "photos/<date>": "face/profil/dos {id,url}", "supplementLogs/<date>": "taken{itemId:true}", "nutritionLogs/<date>": "meals{mealId:{eaten, foods[]}}", "nutrition/plan": "targets{kcal,protein,carbs,fat}, meals[]{id,name,time,foods[]{name,grams,kcal,protein,carbs,fat}}", "supplements/plan": "moments[], items[]{id,name,brand,dose,moment,why,cycle,fat, cycleStart,weeksOn,weeksOff,cycleEnabled}", "stock/<id>": "une ligne par boîte réelle : {name, brand, unit capsule|softgel|gramme|ml, unitsLeft (au comptage), lastCountedAt, countExclude[] (cases déjà cochées au comptage), unitsPerBox, dosePerDay, leadTimeDays, bufferDays, orderedAt (null = pas commandé), supplier, takes[]{item, qty} (cases supplementLogs qui la consomment), food (regex d'aliment Nutrition, whey)}. Le restant réel = unitsLeft − prises cochées depuis lastCountedAt (jours OFF exclus), calcul dans stock.js. Oméga-3 = UNE seule ligne (omega1 + omega2).", "reviews/<id>": "bilan IA : {date, title, summary, changes[]{what,from,to,why}, programVersionFrom, programVersionTo, appliesFrom, seen:false} → l'app affiche une pastille tant que seen=false" }, howToAdjust: "1) lire sessions + measurements ; 2) écrire programVersions/v(N+1) = copie modifiée ; 3) écrire program/current avec version N+1 ; 4) écrire reviews/<date> avec seen:false et la liste des changements. Ne jamais augmenter une charge si pain=true sur l'exercice." };
+  const GUIDE = { version: 2, purpose: "Schéma de la base Shredlog pour une IA", collections: { "program/current": "programme actif : days[] {id, weekday 0=dim, name, rest, kind (\"neck\" pour le bloc cou + trapèzes : déclenche la notification du mercredi 07h30 s'il est prévu weekday 3), exercises[] {id, block, sets, reps, rest, primary, machine{ex,kg,lbs,note}, dumbbell{...}}}. ex = clé de la bibliothèque (voir data.js) ou custom{name,cues}", "programVersions/vN": "copie de chaque version + savedAt + reason", "sessions/<date>_<dayId>": "séance : status in_progress|done|abandoned, exercises[] {id, variant, targetSets, doneSets, sets[]{kg,lbs,reps,done}, difficulty facile|moyen|difficile, pain, note, skipped}", "measurements/<date>": "poids kg, tours en cm (waistRelaxed, neck, chest, armR...), bodyFat %", "photos/<date>": "face/profil/dos {id,url}", "supplementLogs/<date>": "taken{itemId:true}", "nutritionLogs/<date>": "meals{mealId:{eaten, foods[]}}", "nutrition/plan": "targets{kcal,protein,carbs,fat}, meals[]{id,name,time,foods[]{name,grams,kcal,protein,carbs,fat}}", "supplements/plan": "moments[], items[]{id,name,brand,dose,moment,why,cycle,fat, cycleStart,weeksOn,weeksOff,cycleEnabled}", "stock/<id>": "une ligne par boîte réelle : {name, brand, unit capsule|softgel|gramme|ml, unitsLeft (au comptage), lastCountedAt, countExclude[] (cases déjà cochées au comptage), unitsPerBox, dosePerDay, leadTimeDays, bufferDays, orderedAt (null = pas commandé), supplier, takes[]{item, qty} (cases supplementLogs qui la consomment), food (regex d'aliment Nutrition, whey)}. Le restant réel = unitsLeft − prises cochées depuis lastCountedAt (jours OFF exclus), calcul dans stock.js. Oméga-3 = UNE seule ligne (omega1 + omega2).", "reviews/<id>": "bilan IA : {date, title, summary, changes[]{what,from,to,why}, programVersionFrom, programVersionTo, appliesFrom, seen:false} → l'app affiche une pastille tant que seen=false" }, howToAdjust: "1) lire sessions + measurements ; 2) écrire programVersions/v(N+1) = copie modifiée ; 3) écrire program/current avec version N+1 ; 4) écrire reviews/<date> avec seen:false et la liste des changements. Ne jamais augmenter une charge si pain=true sur l'exercice." };
   // Après connexion à la base : état initial du stock (CSV du 27/09) et guide du schéma.
   // Jamais avant la connexion, sinon un appareil neuf écraserait le stock réel avec l'état initial.
   async function afterConnect() {
     if (!Store.db) return;
     try { const snap = await Store.db.collection("stock").get(); const have = new Set(snap.docs.map((d) => d.id)); D.STOCK.forEach((l) => { if (!have.has(l.id) && !Store.get("stock/" + l.id)) Store.set("stock/" + l.id, l); }); } catch (e) { console.warn("stock : lecture impossible, pas d'initialisation", e); }
-    const g = Store.get("meta/guide"); if (!g || !g.collections || !g.collections["stock/<id>"]) Store.set("meta/guide", GUIDE);
+    const g = Store.get("meta/guide"); if (!g || g.version !== GUIDE.version) Store.set("meta/guide", GUIDE);
   }
   Store.connect().then(afterConnect);
   window.Shredlog = { Store, Data, UI, render };

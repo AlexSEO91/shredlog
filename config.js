@@ -4,4 +4,6 @@
 window.SHRED_CONFIG = {
   supabaseUrl: "https://zucsemhdglkuifqvhusi.supabase.co",
   supabaseAnonKey: "sb_publishable_4NEv6_7iVGuhSQvG1K6pUg_3ZBePKz5",
+  // Notifications push : clé VAPID publique (la privée est dans Supabase → Edge Functions → Secrets).
+  vapidPublicKey: "BO67--Fy4TjmV936flvXOAOwJv2eO4tqsHZDygQmeTtGUtSRfHtC2mHmLAcKRWpzIU1E84H8mCwIUqULEOQf5eg",
 };

@@ -31,7 +31,7 @@ window.ShredBackend = (function () {
     const r = await fetch(`${C.supabaseUrl}/rest/v1/${path}`, { ...opts, headers: headers(opts.headers || {}) });
     if (r.status === 401) { session = null; save(); throw new Error("non connecté"); }
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-    return r.status === 204 ? null : r.json();
+    const t = await r.text(); return t ? JSON.parse(t) : null; // 201/204 « return=minimal » : corps vide
   }
   async function list(collection) { const rows = await rest(`docs?collection=eq.${encodeURIComponent(collection)}&select=path,data`); return rows.map((x) => ({ path: x.path, data: x.data })); }
   async function set(path, data) { await rest("docs", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ path, collection: path.split("/")[0], data, updated_at: new Date().toISOString() }) }); }
@@ -45,5 +45,14 @@ window.ShredBackend = (function () {
     const j = await s.json(); if (!s.ok) throw new Error("url signée : " + JSON.stringify(j));
     return { id: name, url: `${C.supabaseUrl}/storage/v1${j.signedURL}`, sizeBytes: blob.size, contentType: "image/jpeg" };
   }
-  return { kind: "supabase", configured, get user() { return session ? session.user : null; }, get connected() { return !!session; }, login, logout, list, set, del, upload };
+  // Notifications push : appareil abonné (table shredlog_push_subscriptions, RLS par utilisateur) + Edge Function.
+  async function savePushSub(row) { await rest("shredlog_push_subscriptions?on_conflict=endpoint", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(row) }); }
+  async function deletePushSub(endpoint) { await rest(`shredlog_push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }); }
+  async function invoke(name, body) {
+    await refreshIfNeeded();
+    const r = await fetch(`${C.supabaseUrl}/functions/v1/${name}`, { method: "POST", headers: headers(), body: JSON.stringify(body || {}) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || j.message || j.msg || `erreur ${r.status}`);
+    return j;
+  }
+  return { kind: "supabase", configured, get user() { return session ? session.user : null; }, get connected() { return !!session; }, login, logout, list, set, del, upload, savePushSub, deletePushSub, invoke };
 })();
