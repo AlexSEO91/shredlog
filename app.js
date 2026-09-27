@@ -318,7 +318,7 @@
   function activeSession() { return Data.sessions().find((s) => s.status === "in_progress") || null; }
   function renderSession() {
     const s = activeSession();
-    if (s) return renderExercise(s);
+    if (s) return UI.sessionOverview ? renderSessionOverview(s) : renderExercise(s);
     const p = Data.program(); if (!p) return `<div class="card">Programme absent. <button class="btn sm primary" data-act="load-default">Charger le programme</button></div>`;
     const today = isoDate(); const wd = parseDate(today).getDay();
     const main = Data.dayByWeekday(wd); const firstDay = p.days.find((d) => !d.rest);
@@ -337,6 +337,22 @@
     <button class="btn primary wide" data-act="start-session" data-id="${day.id}">${doneToday ? "Refaire la séance" : "Commencer la séance"}</button>
     ${doneToday ? `<p class="tiny faint" style="text-align:center;margin-top:8px">Une nouvelle séance remplacera celle d'aujourd'hui pour ce jour.</p>` : ""}`;
   }
+  // Séance en cours : liste des exercices (retour depuis une fiche). Rien n'est perdu en quittant l'écran.
+  function renderSessionOverview(s) {
+    const day = Data.dayById(s.dayId); const pct = sessionProgress(s);
+    const nameAt = (se) => { const pe = (day && day.exercises.find((e) => e.id === se.id)) || {}; const v = pe[se.variant] || pe.machine || pe.dumbbell; return v ? Data.exInfo(v).name : se.name || se.id; };
+    const curName = nameAt(s.exercises[s.cursor]);
+    const rows = s.exercises.map((se, i) => {
+      const pe = (day && day.exercises.find((e) => e.id === se.id)) || {}; const info = Data.exInfo(pe[se.variant] || pe.machine || pe.dumbbell) || { name: se.name || se.id };
+      const status = se.skipped ? '<span class="badge">passé</span>' : se.warmup ? (se.doneSets ? '<span class="badge acc">✓</span>' : "") : se.doneSets >= se.targetSets ? `<span class="badge acc">✓ ${se.doneSets}/${se.targetSets}</span>` : se.doneSets ? `<span class="badge amber">${se.doneSets}/${se.targetSets}</span>` : "";
+      return `<button class="item" style="width:100%;text-align:left${i === s.cursor ? ";background:var(--accent-soft);border-radius:var(--rs)" : ""}" data-act="session-goto" data-i="${i}"><span class="n">${se.warmup ? "éch." : esc(se.block)}</span><div class="grow"><div class="t">${esc(info.name || se.name || se.id)}</div><div class="s">${se.warmup ? esc(se.reps) : `${se.targetSets} × ${esc(se.reps)}`}${i === s.cursor ? " · <b>tu en étais là</b>" : ""}</div></div>${status}<span class="chev">›</span></button>`;
+    }).join("");
+    return `<div class="card"><div class="row between"><div><div class="eyebrow">Séance en cours</div><h2 style="margin-top:2px">${esc(s.dayName)}</h2></div><b class="num">${pct} %</b></div><div class="progress" style="margin-top:8px"><i style="width:${pct}%"></i></div>
+      <p class="tiny muted" style="margin-top:8px">Chaque saisie est enregistrée au fur et à mesure. Tu peux quitter cet écran ou fermer l'app : la séance reste « en cours » et tu la retrouves ici, là où tu l'as laissée.</p></div>
+    <div class="card"><div class="list">${rows}</div></div>
+    <button class="btn primary wide" data-act="session-goto" data-i="${s.cursor}">Reprendre : ${esc(curName)}</button>
+    <div class="btnrow" style="margin-top:10px"><button class="btn line sm" data-act="finish-session">Terminer la séance</button><button class="btn danger sm" data-act="abandon-session">Abandonner</button></div>`;
+  }
   function renderExercise(s) {
     const day = Data.dayById(s.dayId); const idx = Math.min(s.cursor, s.exercises.length - 1); const se = s.exercises[idx]; const pe = (day && day.exercises.find((e) => e.id === se.id)) || {};
     const total = s.exercises.length; const pct = sessionProgress(s);
@@ -347,6 +363,7 @@
     const rows = se.sets.map((st, i) => `<tr class="${st.done ? "done" : ""}"><td class="idx">${i + 1}</td><td class="prev">${prevStr(i)}</td><td><input type="number" inputmode="decimal" step="0.5" value="${st.kg ?? ""}" placeholder="PDC" data-bind="kg" data-i="${i}" aria-label="kg série ${i + 1}"></td><td><input type="number" inputmode="decimal" step="0.5" value="${st.lbs ?? ""}" placeholder="–" data-bind="lbs" data-i="${i}" aria-label="lbs série ${i + 1}"></td><td><input type="text" inputmode="numeric" value="${esc(st.reps)}" data-bind="reps" data-i="${i}" aria-label="reps série ${i + 1}"></td><td class="chk">${checkbox(st.done, "toggle-set", `data-i="${i}"`)}</td></tr>`).join("");
     const diff = ["facile", "moyen", "difficile"].map((d) => `<button class="chip ${se.difficulty === d ? "on " + (d === "facile" ? "easy" : d === "difficile" ? "hard" : "") : ""}" data-act="difficulty" data-v="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join("");
     return `
+    <div class="row between" style="margin-bottom:8px"><button class="small" style="color:var(--accent);font-weight:600;padding:6px 0" data-act="session-overview" aria-label="Retour à la liste des exercices">‹ Exercices de la séance</button><span class="tiny faint">enregistrée · séance en cours</span></div>
     <div class="pct">${pct} % · exercice ${idx + 1} / ${total}${se.superset ? ` · ${esc(se.superset)}` : ""}</div>
     <div class="progress" style="margin-bottom:12px"><i style="width:${pct}%"></i></div>
     <div class="card" style="padding:12px">
@@ -761,7 +778,7 @@
     ${pushCard()}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 14 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 15 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
@@ -798,7 +815,7 @@
       case "confirm-ok": { const fn = UI._confirm; UI._confirm = null; closeSheet(); if (fn) fn(); break; }
       case "load-default": Data.ensureProgram(); render(); break;
       case "pick-day": UI.sessionDay = id; render(); break;
-      case "start-session": { const day = Data.dayById(id); const s = newSession(day); Data.sessions().filter((x) => x.status === "in_progress").forEach((x) => { x.status = "abandoned"; x.finishedAt = new Date().toISOString(); saveSession(x); }); UI.cuesOpen = false; UI.summary = null; saveSession(s); render(); break; }
+      case "start-session": { const day = Data.dayById(id); const s = newSession(day); Data.sessions().filter((x) => x.status === "in_progress").forEach((x) => { x.status = "abandoned"; x.finishedAt = new Date().toISOString(); saveSession(x); }); UI.cuesOpen = false; UI.summary = null; UI.sessionOverview = false; saveSession(s); render(); break; }
       case "variant": withSession((s) => { const se = s.exercises[s.cursor]; const day = Data.dayById(s.dayId); const pe = day && day.exercises.find((e) => e.id === se.id); if (!pe) return; const v = pe[b.dataset.v]; if (!v) return; se.variant = b.dataset.v; se.sets.forEach((st) => { if (!st.done) { st.kg = v.kg; st.lbs = toLbs(v.kg); } }); }); render(); break;
       case "toggle-cues": UI.cuesOpen = !UI.cuesOpen; render(); break;
       case "toggle-set": withSession((s) => { const se = s.exercises[s.cursor]; const i = +b.dataset.i; se.sets[i].done = !se.sets[i].done; se.doneSets = se.sets.filter((x) => x.done).length; }); render(); break;
@@ -810,6 +827,8 @@
       case "rest": if (Timer.running()) Timer.stop(); else Timer.start(+b.dataset.s || 60); break;
       case "ex-prev": withSession((s) => { s.cursor = Math.max(0, s.cursor - 1); }); UI.cuesOpen = false; render(); break;
       case "ex-next": { const s = activeSession(); if (!s) break; if (s.cursor >= s.exercises.length - 1) { finishSession(s); render(); summarySheet(s); } else { s.cursor++; saveSession(s); UI.cuesOpen = false; render(); } break; }
+      case "session-overview": flushDebounced(); UI.sessionOverview = true; UI.cuesOpen = false; render(); window.scrollTo(0, 0); break;
+      case "session-goto": withSession((s) => { s.cursor = Math.max(0, Math.min(s.exercises.length - 1, +b.dataset.i)); }); UI.sessionOverview = false; UI.cuesOpen = false; render(); window.scrollTo(0, 0); break;
       case "skip-ex": withSession((s) => { const se = s.exercises[s.cursor]; se.skipped = true; if (s.cursor < s.exercises.length - 1) s.cursor++; }); render(); break;
       case "finish-session": { const s = activeSession(); if (!s) break; ask("Terminer la séance ?", "Les exercices non faits resteront à 0. La séance sera enregistrée telle quelle.", "Terminer", () => { finishSession(s); render(); summarySheet(s); }); break; }
       case "abandon-session": { const s = activeSession(); if (!s) break; ask("Abandonner la séance ?", "La séance en cours sera fermée sans être comptée.", "Abandonner", () => { s.status = "abandoned"; s.finishedAt = new Date().toISOString(); saveSession(s); Timer.stop(); render(); }, true); break; }
@@ -911,7 +930,12 @@
     else if (bind === "cmpB") { UI.cmpB = el.value; render(); }
     else if (bind === "photo" && el.files && el.files[0]) uploadPhoto(el.files[0], el.dataset.k);
   });
-  const timers = {}; function debounce(k, fn, ms = 500) { clearTimeout(timers[k]); timers[k] = setTimeout(fn, ms); }
+  const timers = {}; const pendingFns = {};
+  function debounce(k, fn, ms = 500) { clearTimeout(timers[k]); pendingFns[k] = fn; timers[k] = setTimeout(() => { delete pendingFns[k]; fn(); }, ms); }
+  // Exécute tout de suite les enregistrements en attente (sortie de fiche, app mise en arrière-plan ou fermée).
+  function flushDebounced() { Object.keys(pendingFns).forEach((k) => { clearTimeout(timers[k]); const fn = pendingFns[k]; delete pendingFns[k]; fn(); }); }
+  document.addEventListener("visibilitychange", () => { if (document.hidden) flushDebounced(); });
+  window.addEventListener("pagehide", flushDebounced);
   function saveSessionDebounced(s) { debounce("session", () => saveSession(s), 400); }
 
   $("#timer-add").addEventListener("click", () => Timer.add(15));
