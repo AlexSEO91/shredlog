@@ -218,27 +218,55 @@ window.SHRED_DATA = (function () {
       { id: "coucher", label: "Coucher", time: "22:30" },
     ],
     items: [
-      { id: "tongkat", name: "Tongkat Ali", brand: "Advance Physician Formulas 200 mg", dose: "1 cap", moment: "reveil", cycle: "8 sem ON / 4 OFF", why: "Soutien de la testostérone libre et de la libido. À cycler. Stop si insomnie, irritabilité, acné, mamelons sensibles." },
+      { id: "tongkat", cycleStart: "2026-09-28", weeksOn: 8, weeksOff: 4, cycleEnabled: true, name: "Tongkat Ali", brand: "Advance Physician Formulas 200 mg", dose: "1 cap", moment: "reveil", cycle: "8 sem ON / 4 OFF", why: "Soutien de la testostérone libre et de la libido. À cycler. Stop si insomnie, irritabilité, acné, mamelons sensibles." },
       { id: "citrulline", name: "L-Citrulline", brand: "Doctor's Best Powder", dose: "3 g (1 scoop) dans l'eau", moment: "reveil", why: "Précurseur de l'arginine → oxyde nitrique : circulation, pump, volume séminal. Se mélange avec collagène + vit C." },
-      { id: "rhodiola", name: "Rhodiola", brand: "Thorne 100 mg", dose: "2 caps (200 mg)", moment: "reveil", cycle: "6 sem ON / 2 OFF", why: "Adaptogène anti-fatigue, énergie mentale et résistance au stress. Jamais le soir." },
+      { id: "rhodiola", cycleStart: "2026-09-28", weeksOn: 6, weeksOff: 2, cycleEnabled: true, name: "Rhodiola", brand: "Thorne 100 mg", dose: "2 caps (200 mg)", moment: "reveil", cycle: "6 sem ON / 2 OFF", why: "Adaptogène anti-fatigue, énergie mentale et résistance au stress. Jamais le soir." },
       { id: "probio", name: "Probiotiques", brand: "Garden of Life Men's 50B", dose: "1 cap", moment: "reveil", why: "Flore intestinale : digestion, absorption des nutriments, immunité." },
       { id: "theanine", name: "L-Théanine", brand: "NOW 200 mg", dose: "1 cap avec le café", moment: "petitdej", why: "Lisse l'effet de la caféine : concentration calme, sans nervosité. Ratio 2:1 avec ~100 mg de caféine." },
       { id: "bcomplex", name: "B-Complex", brand: "Thorne Basic B", dose: "1 cap", moment: "petitdej", why: "Énergie cellulaire, système nerveux, méthylation. Contient déjà 400 µg de méthyl-B12." },
-      { id: "d3k2", name: "Vitamine D3 + K2", brand: "Thorne Liquid", dose: "2-4 gouttes", moment: "petitdej", fat: true, why: "Testostérone, immunité, os. Liposoluble → avec du gras (œufs, avocat, noix). Cible sanguine 40-60 ng/mL." },
+      { id: "d3k2", name: "Vitamine D3 + K2", brand: "Thorne Liquid", dose: "3 gouttes (0,15 ml)", moment: "petitdej", fat: true, why: "Testostérone, immunité, os. Liposoluble → avec du gras (œufs, avocat, noix). Cible sanguine 40-60 ng/mL." },
       { id: "coq10", name: "CoQ10 Ubiquinol", brand: "Doctor's Best Kaneka", dose: "100 mg", moment: "petitdej", fat: true, why: "Énergie mitochondriale, cœur, antioxydant. Avec un repas gras." },
       { id: "creatine", name: "Créatine", brand: "Thorne (NSF)", dose: "5 g", moment: "petitdej", why: "Force, volume musculaire, cognition. Tous les jours, même au repos. Boire 3-4 L d'eau." },
       { id: "omega1", name: "Oméga-3 #1", brand: "Nordic Naturals Ultimate Omega 2X", dose: "1 softgel", moment: "petitdej", fat: true, why: "EPA/DHA : anti-inflammatoire, récupération, cœur, cerveau. 2e prise au déjeuner." },
-      { id: "collagen", name: "Collagène + Vitamine C", brand: "Sports Research + California Gold C", dose: "10-20 g + 1 cap", moment: "petitdej", why: "Tendons, articulations, peau. La vitamine C est nécessaire à la synthèse du collagène." },
+      { id: "collagen", name: "Collagène + Vitamine C", brand: "Sports Research + California Gold C", dose: "15 g + 1 cap", moment: "petitdej", why: "Tendons, articulations, peau. La vitamine C est nécessaire à la synthèse du collagène." },
       { id: "omega2", name: "Oméga-3 #2", brand: "Nordic Naturals", dose: "1 softgel", moment: "dejeuner", fat: true, why: "2e prise d'EPA/DHA, avec un repas gras." },
       { id: "asta", name: "Astaxanthine", brand: "NOW AstaReal 10 mg", dose: "1 softgel", moment: "dejeuner", fat: true, why: "Antioxydant puissant : peau, yeux, endurance, fertilité. Liposoluble." },
-      { id: "boron", name: "Boron", brand: "NOW 3 mg", dose: "1-2 caps (3-6 mg)", moment: "dejeuner", cycle: "8 sem ON / 4 OFF", why: "Augmente la testostérone libre (baisse la SHBG), os. À cycler avec le Tongkat." },
+      { id: "boron", cycleStart: "2026-09-28", weeksOn: 8, weeksOff: 4, cycleEnabled: true, name: "Boron", brand: "NOW 3 mg", dose: "1 cap (3 mg)", moment: "dejeuner", cycle: "8 sem ON / 4 OFF", why: "Augmente la testostérone libre (baisse la SHBG), os. À cycler avec le Tongkat." },
       { id: "selenium", name: "Sélénium", brand: "NOW 100 µg", dose: "1 cap", moment: "dejeuner", why: "Thyroïde, antioxydant, qualité du sperme." },
-      { id: "lecithin", name: "Lécithine tournesol", brand: "NOW 1200 mg", dose: "1-2 softgels", moment: "dejeuner", why: "Choline et phospholipides : foie, cerveau, volume séminal." },
+      { id: "lecithin", name: "Lécithine tournesol", brand: "NOW 1200 mg", dose: "2 softgels", moment: "dejeuner", why: "Choline et phospholipides : foie, cerveau, volume séminal." },
       { id: "zinc", name: "Zinc Picolinate", brand: "Thorne 15 mg", dose: "1 cap", moment: "diner", why: "Testostérone, immunité, peau. Séparer du magnésium de 2 h (compétition d'absorption)." },
       { id: "ashwa", name: "Ashwagandha Sensoril", brand: "Life Extension 125 mg", dose: "1 cap", moment: "diner", why: "Baisse le cortisol, améliore sommeil et récupération. Surveiller le foie (bilan ALAT/ASAT)." },
       { id: "magnesium", name: "Magnésium bisglycinate", brand: "Doctor's Best 300 mg", dose: "3 caps", moment: "coucher", why: "Relaxation, sommeil profond, récupération musculaire, 300+ réactions enzymatiques. 60 min avant le coucher." },
     ],
   };
+
+  // Stock — état initial = COMPLEMENTS_INVENTAIRE.csv (comptage du 27/09/2026, avant les prises du jour).
+  // Une ligne par boîte réelle ; takes = cases de la liste du jour qui la consomment (qty dans l'unité de la ligne).
+  // Oméga-3 : UNE seule ligne consommée par omega1 + omega2. Whey : consommée par les repas validés (Nutrition).
+  const STOCK_COUNTED = "2026-09-27";
+  const st = (id, name, brand, unit, unitsLeft, unitsPerBox, dosePerDay, takes, extra) => ({ id, name, brand, unit, unitsLeft, unitsPerBox, dosePerDay, leadTimeDays: 10, bufferDays: 7, lastCountedAt: STOCK_COUNTED, countExclude: [], orderedAt: null, supplier: "iHerb", takes, ...(extra || {}) });
+  const STOCK = [
+    st("probio", "Probiotiques", "Garden of Life Men's 50B", "capsule", 0, 30, 1, [{ item: "probio", qty: 1 }], { orderedAt: STOCK_COUNTED }),
+    st("creatine", "Créatine", "Thorne (NSF)", "gramme", 90, 150, 5, [{ item: "creatine", qty: 5 }]),
+    st("omega3", "Oméga-3", "Nordic Naturals Ultimate Omega 2X", "softgel", 29, 60, 2, [{ item: "omega1", qty: 1 }, { item: "omega2", qty: 1 }]),
+    st("collagen", "Collagène", "Sports Research", "gramme", 200, 300, 15, [{ item: "collagen", qty: 15 }]),
+    st("rhodiola", "Rhodiola", "Thorne 100 mg", "capsule", 42, 60, 2, [{ item: "rhodiola", qty: 2 }]),
+    st("whey", "Whey ISO100", "Dymatize Hydrolyzed", "gramme", 2100, 2300, 60, [], { food: "whey", leadTimeDays: 1, supplier: "Central", note: "Achat Central Thailand, pas iHerb. Décomptée depuis les repas validés dans Nutrition." }),
+    st("tongkat", "Tongkat Ali", "Advance Physician Formulas 200 mg", "capsule", 39, 60, 1, [{ item: "tongkat", qty: 1 }]),
+    st("theanine", "L-Théanine", "NOW 200 mg", "capsule", 39, 60, 1, [{ item: "theanine", qty: 1 }]),
+    st("magnesium", "Magnésium bisglycinate", "Doctor's Best 300 mg", "capsule", 118, 120, 3, [{ item: "magnesium", qty: 3 }]),
+    st("bcomplex", "B-Complex", "Thorne Basic B", "capsule", 41, 60, 1, [{ item: "bcomplex", qty: 1 }]),
+    st("asta", "Astaxanthine", "NOW AstaReal 10 mg", "softgel", 41, 60, 1, [{ item: "asta", qty: 1 }]),
+    st("boron", "Boron", "NOW 3 mg", "capsule", 85, 100, 1, [{ item: "boron", qty: 1 }]),
+    st("lecithin", "Lécithine tournesol", "NOW 1200 mg", "softgel", 86, 100, 2, [{ item: "lecithin", qty: 2 }]),
+    st("vitc", "Vitamine C", "California Gold", "capsule", 47, 60, 1, [{ item: "collagen", qty: 1 }]),
+    st("zinc", "Zinc Picolinate", "Thorne 15 mg", "capsule", 52, 60, 1, [{ item: "zinc", qty: 1 }]),
+    st("ashwa", "Ashwagandha Sensoril", "Life Extension 125 mg", "capsule", 52, 60, 1, [{ item: "ashwa", qty: 1 }]),
+    st("citrulline", "L-Citrulline", "Doctor's Best Powder", "gramme", 180, 200, 3, [{ item: "citrulline", qty: 3 }]),
+    st("selenium", "Sélénium", "NOW 100 µg", "capsule", 87, 100, 1, [{ item: "selenium", qty: 1 }]),
+    st("d3k2", "Vitamine D3 + K2", "Thorne Liquid", "ml", 25, 30, 0.15, [{ item: "d3k2", qty: 0.15 }], { note: "3 gouttes/jour, conversion 20 gouttes/ml à confirmer sur le flacon." }),
+    st("coq10", "CoQ10 Ubiquinol", "Doctor's Best Kaneka 100 mg", "softgel", 71, 90, 1, [{ item: "coq10", qty: 1 }]),
+  ];
 
   // Structure nutrition (le plan alimentaire sera construit ensuite — cible provisoire issue de la fiche projet)
   const NUTRITION = {
@@ -270,5 +298,5 @@ window.SHRED_DATA = (function () {
 
   const MUSCLE_LABELS = { chest: "Pectoraux", shoulders: "Épaules", triceps: "Triceps", biceps: "Biceps", forearms: "Avant-bras", abdominals: "Abdominaux", quadriceps: "Quadriceps", calves: "Mollets", traps: "Trapèzes", lats: "Grand dorsal", "middle back": "Milieu du dos", "lower back": "Lombaires", glutes: "Fessiers", hamstrings: "Ischio-jambiers", neck: "Cou" };
 
-  return { EX, PROGRAM, SUPPLEMENTS, NUTRITION, MEASURE_FIELDS, BASELINE, MUSCLE_LABELS, kg };
+  return { EX, PROGRAM, SUPPLEMENTS, STOCK, NUTRITION, MEASURE_FIELDS, BASELINE, MUSCLE_LABELS, kg };
 })();

@@ -21,7 +21,7 @@
   const fmtK = (v) => v == null ? "–" : String(Math.round(v * 10) / 10);
 
   /* ───────────────────────── Store : local-first + db ───────────────────────── */
-  const COLLECTIONS = ["program", "programVersions", "sessions", "measurements", "photos", "supplementLogs", "nutritionLogs", "reviews", "settings", "nutrition", "supplements", "meta"];
+  const COLLECTIONS = ["program", "programVersions", "sessions", "measurements", "photos", "supplementLogs", "nutritionLogs", "reviews", "settings", "nutrition", "supplements", "stock", "meta"];
   const Store = {
     docs: {}, pending: new Set(), db: null, assets: null, downloads: null, mode: "local", listeners: [],
     loadLocal() {
@@ -101,6 +101,11 @@
     settings() { return Store.get("settings/app") || { theme: "auto", heightCm: 172, name: "Alex", unit: "kg", startDate: isoDate() }; },
     saveSettings(s) { Store.set("settings/app", s); },
     supplements() { return Store.get("supplements/plan") || D.SUPPLEMENTS; },
+    // Stock : état initial de data.js, remplacé ligne par ligne par stock/<id> dès qu'il existe en base.
+    stockLines() { const ids = new Set(D.STOCK.map((l) => l.id)); const extra = Store.list("stock").filter((x) => !ids.has(x.id)).map((x) => x.data); return D.STOCK.map((l) => ({ ...clone(l), ...(Store.get("stock/" + l.id) || {}) })).concat(extra); },
+    stockCtx() { const plan = this.supplements(); const def = Object.fromEntries(D.SUPPLEMENTS.items.map((i) => [i.id, i])); return { supLog: (d) => Store.get("supplementLogs/" + d), nutLog: (d) => Store.get("nutritionLogs/" + d), nutPlan: this.nutrition(), cycleOf: (id) => { const i = plan.items.find((x) => x.id === id); return i && i.cycleStart ? i : def[id] || null; } }; },
+    stock(today = isoDate()) { const ctx = this.stockCtx(); return this.stockLines().map((l) => ({ line: l, st: window.ShredStock.status(l, today, ctx) })).sort((a, b) => (a.st.rupture || "9999") < (b.st.rupture || "9999") ? -1 : (a.st.rupture || "9999") > (b.st.rupture || "9999") ? 1 : 0); },
+    saveStock(line) { Store.set("stock/" + line.id, line); },
     nutrition() { return Store.get("nutrition/plan") || D.NUTRITION; },
     dayByWeekday(wd) { const p = this.program(); return p ? p.days.find((d) => d.weekday === wd) : null; },
     dayById(id) { const p = this.program(); return p ? p.days.find((d) => d.id === id) : null; },
@@ -185,7 +190,7 @@
   }
 
   /* ───────────────────────── Router ───────────────────────── */
-  const VIEWS = { home: "Aujourd'hui", session: "Séance", program: "Programme", track: "Suivi", supps: "Compléments", nutrition: "Nutrition", reviews: "Bilan & ajustements", export: "Export / Import", settings: "Réglages", more: "Plus", posture: "Routine posture" };
+  const VIEWS = { home: "Aujourd'hui", session: "Séance", program: "Programme", track: "Suivi", supps: "Compléments", stock: "Stock", recount: "Recompter", nutrition: "Nutrition", reviews: "Bilan & ajustements", export: "Export / Import", settings: "Réglages", more: "Plus", posture: "Routine posture" };
   function route() {
     const v = (location.hash || "#home").slice(1).split("?")[0];
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -201,7 +206,7 @@
     const t = isoDate(); $("#hdr-date").textContent = fmtDate(t, true);
     const p = Data.program(); $("#ver-prog").textContent = p ? p.version : "–";
     $("#more-dot").classList.toggle("hidden", Data.unseenReviews() === 0);
-    const fn = { home: renderHome, session: renderSession, program: renderProgram, track: renderTrack, supps: renderSupps, nutrition: renderNutrition, reviews: renderReviews, export: renderExport, settings: renderSettings, more: renderMore, posture: renderPosture }[UI.view];
+    const fn = { home: renderHome, session: renderSession, program: renderProgram, track: renderTrack, supps: renderSupps, stock: renderStock, recount: renderRecount, nutrition: renderNutrition, reviews: renderReviews, export: renderExport, settings: renderSettings, more: renderMore, posture: renderPosture }[UI.view];
     $("#v-" + UI.view).innerHTML = (UI.sheetHtml ? `<div class="card inline-sheet"><div class="row between" style="margin-bottom:8px"><span class="eyebrow">Fenêtre</span><button class="btn sm ghost" data-act="close-sheet">✕ Fermer</button></div>${UI.sheetHtml}</div>` : "") + fn();
     $$(".topnav a").forEach((a) => a.classList.toggle("on", a.getAttribute("href") === "#" + UI.view || (a.getAttribute("href") === "#more" && !["home", "session", "track", "nutrition"].includes(UI.view))));
   }
@@ -235,7 +240,7 @@
     else if (doneToday) cta = `<div class="row"><span class="badge" style="background:rgba(255,255,255,.25);color:#fff">Séance faite ✓</span><span class="small">${esc(doneToday.dayName)} · ${doneToday.exercises.filter((e) => e.doneSets > 0).length} exos</span></div>`;
     else if (day && !day.rest) cta = `<a class="btn wide" style="background:#fff;color:var(--accent)" href="#session">Commencer ${esc(day.name)} · ${day.exercises.length} exos · ~${day.duration} min</a>`;
     else cta = `<a class="btn wide" style="background:#fff;color:var(--accent)" href="#posture">Routine posture 5 min</a>`;
-    return `
+    return `${stockBanner()}
     <div class="band">
       <div class="eyebrow">${esc(fmtDate(today, true))}</div>
       <h1 style="margin:4px 0 10px">${day ? esc(day.name) : "Repos"}</h1>
@@ -257,6 +262,7 @@
       <div class="list">
         ${wd === 0 || daysSince(lastM && lastM.date) >= 7 ? `<a class="item" href="#track" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">Mensurations de la semaine</div><div class="s">Poids à jeun, tour de taille, bras, cuisses</div></div><span class="chev">›</span></a>` : ""}
         ${daysSince(lastP && lastP.date) >= 7 ? `<a class="item" href="#track?photos" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">Photos face / profil / dos</div><div class="s">Même lumière, même heure, torse nu</div></div><span class="chev">›</span></a>` : ""}
+        ${(() => { const lr = lastRecount(); return lr && daysSince(lr) >= 30 ? `<a class="item" href="#recount" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">Recompte tes boîtes</div><div class="s">Dernier comptage il y a ${daysSince(lr)} j · capsules et softgels</div></div><span class="chev">›</span></a>` : ""; })()}
         <a class="item" href="#posture" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">Routine posture 5 min</div><div class="s">Anti-bascule du bassin, tous les jours</div></div><span class="chev">›</span></a>
         <a class="item" href="#supps" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">Compléments</div><div class="s">${supDone}/${sup.items.length} pris aujourd'hui</div></div><div class="progress" style="width:70px"><i style="width:${Math.round(100 * supDone / sup.items.length)}%"></i></div></a>
       </div>
@@ -493,10 +499,47 @@
     const groups = plan.moments.map((m) => { const items = plan.items.filter((i) => i.moment === m.id); if (!items.length) return ""; const allOn = items.every((i) => log.taken[i.id]);
       return `<div class="card" style="padding:12px 14px"><div class="row between" style="margin-bottom:4px"><div><b>${esc(m.label)}</b> <span class="tiny faint">${esc(m.time || "")}</span></div><button class="btn sm ${allOn ? "ghost" : "primary"}" data-act="sup-all" data-m="${m.id}">${allOn ? "Tout décocher" : "Tout pris"}</button></div>
         ${items.map((i) => `<div class="sup ${UI.supOpen === i.id ? "open" : ""}">${checkbox(!!log.taken[i.id], "sup-toggle", `data-id="${i.id}"`)}<div class="grow"><button style="text-align:left;width:100%" data-act="sup-info" data-id="${i.id}"><div class="t">${esc(i.name)} <span class="tiny faint">ⓘ</span>${i.fat ? ' <span class="badge amber" title="avec un repas gras">gras</span>' : ""}${i.cycle ? ` <span class="badge">${esc(i.cycle)}</span>` : ""}</div><div class="s">${esc(i.dose)} · ${esc(i.brand)}</div></button><div class="why">${esc(i.why)}</div></div></div>`).join("")}</div>`; }).join("");
+    const toOrder = stockToOrder().length;
     return `
+    <a href="#stock" class="card row between" style="text-decoration:none;color:inherit;padding:12px 14px"><div><b>Stock</b><div class="small muted">${toOrder ? `<span style="color:var(--red);font-weight:600">${toOrder} à commander</span>` : "rien à commander"}</div></div><span class="chev">›</span></a>
     <div class="card"><div class="row between"><div><div class="eyebrow">Prises du jour</div><div class="big">${done}<span style="font-size:22px;color:var(--ink3)">/${plan.items.length}</span></div></div><input type="date" value="${date}" style="width:auto" data-bind="sup-date"></div><div class="progress" style="margin-top:8px"><i style="width:${Math.round(100 * done / plan.items.length)}%"></i></div></div>
     ${groups}
     <div class="notice small">Règles : Zinc et Magnésium séparés de 2 h · liposolubles (D3+K2, CoQ10, Oméga-3, Astaxanthine) avec ≥ 10 g de gras · Tongkat + Boron 8 sem ON / 4 OFF · Rhodiola 6 ON / 2 OFF, jamais le soir · 3-4 L d'eau/jour.</div>`;
+  }
+
+  /* ───────────────────────── Stock ───────────────────────── */
+  const UNIT_LABEL = { capsule: ["capsule", "capsules"], softgel: ["softgel", "softgels"], gramme: ["g", "g"], ml: ["ml", "ml"] };
+  function fmtQty(q, unit) { const v = Math.round(q * 100) / 100; const l = UNIT_LABEL[unit] || [unit, unit]; return `${String(v).replace(".", ",")} ${v > 1 ? l[1] : l[0]}`; }
+  const LEVEL = { red: ["red", "à commander"], amber: ["amber", "bientôt"], green: ["green", "OK"] };
+  function stockToOrder() { return Data.stock().filter((x) => x.st.inAlert && !x.st.ordered); }
+  function stockBanner() {
+    const todo = stockToOrder(); if (!todo.length) return "";
+    return `<a href="#stock" class="notice red row between" style="text-decoration:none;color:inherit;margin-bottom:14px"><div><b>${todo.length} complément${todo.length > 1 ? "s" : ""} à commander</b><div class="small">${todo.map((x) => esc(x.line.name)).join(", ")}</div></div><span class="chev">›</span></a>`;
+  }
+  function lastRecount() { const ds = Data.stockLines().filter(window.ShredStock.countable).map((l) => l.lastCountedAt).filter(Boolean).sort(); return ds[0] || null; }
+  function renderRecount() {
+    const rows = Data.stock().filter((x) => window.ShredStock.countable(x.line)).sort((a, b) => a.line.name.localeCompare(b.line.name, "fr"));
+    const last = lastRecount();
+    return `<div class="card"><p class="small">Compte ce qu'il reste dans chaque boîte et corrige les lignes qui ne collent pas. Les champs sont pré-remplis avec le stock théorique (prises cochées déduites).</p><p class="tiny muted" style="margin-top:6px">Capsules et softgels uniquement : les poudres et le flacon de D3 se corrigent avec « Reçu » dans Stock. ${last ? "Plus ancien comptage : " + fmtDate(last) : ""}</p>
+      <button class="btn primary wide" style="margin-top:12px" data-act="recount-ok">Tout est juste</button></div>
+    <div class="card"><div class="list">${rows.map(({ line: l, st }) => `<div class="item"><div class="grow"><div class="t">${esc(l.name)}</div><div class="s">compté le ${l.lastCountedAt ? fmtDate(l.lastCountedAt) : "–"} · ${esc((UNIT_LABEL[l.unit] || [l.unit, l.unit])[1])}</div></div><input type="number" inputmode="numeric" min="0" step="1" style="width:90px;text-align:right" data-recount="${l.id}" data-theo="${st.unitsLeft}" value="${st.unitsLeft}" aria-label="${esc(l.name)} : unités comptées"></div>`).join("")}</div>
+      <button class="btn ghost wide" style="margin-top:12px" data-act="recount-save">Enregistrer les corrections</button></div>`;
+  }
+  function renderStock() {
+    const rows = Data.stock(); const today = isoDate();
+    const cnt = (lv) => rows.filter((x) => x.st.level === lv).length;
+    const cards = rows.map(({ line: l, st }) => { const [cls, lab] = LEVEL[st.level];
+      return `<div class="card stk ${cls}">
+        <div class="row between"><div><b>${esc(l.name)}</b>${st.ordered ? ` <span class="badge">commandé le ${fmtDate(l.orderedAt)}</span>` : ""}${st.off ? ' <span class="badge">pause</span>' : ""}<div class="tiny muted">${esc(l.brand)} · ${esc(l.supplier || "")}</div></div><span class="badge ${cls}">${st.daysLeft == null ? "–" : st.daysLeft + " j"}</span></div>
+        <div class="small" style="margin-top:8px">reste <b>${fmtQty(st.unitsLeft, l.unit)}</b> · ${fmtQty(l.dosePerDay, l.unit)}/jour · rupture <b>${st.rupture ? fmtDate(st.rupture) : "–"}</b></div>
+        <div class="tiny muted">${st.inAlert ? `<b style="color:var(--red)">${lab}</b> — seuil du ${fmtDate(st.alertDate)}` : `Commander à partir du ${st.alertDate ? fmtDate(st.alertDate) : "–"}`} · délai ${l.leadTimeDays} j + marge ${l.bufferDays} j · <button class="tiny" style="color:var(--accent);font-weight:600" data-act="stock-edit" data-id="${l.id}">Réglages</button></div>
+        ${l.note ? `<div class="tiny faint" style="margin-top:4px">${esc(l.note)}</div>` : ""}
+        <div class="btnrow"><button class="btn sm ${st.ordered ? "line" : st.inAlert ? "primary" : "ghost"}" data-act="stock-ordered" data-id="${l.id}">${st.ordered ? "Annuler « commandé »" : "Recommandé"}</button><button class="btn sm ghost" data-act="stock-recv" data-id="${l.id}">Reçu — j'ai X unités</button></div></div>`; }).join("");
+    const last = lastRecount();
+    return `<a href="#recount" class="card row between" style="text-decoration:none;color:inherit;padding:12px 14px"><div><b>Recompter mes boîtes</b><div class="small muted">${last ? "plus ancien comptage : " + fmtDate(last) : "jamais recompté"} · une fois par mois</div></div><span class="chev">›</span></a>
+    <div class="card"><div class="eyebrow">Stock au ${fmtDate(today)}</div><div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap"><span class="badge red">${cnt("red")} à commander</span><span class="badge amber">${cnt("amber")} bientôt</span><span class="badge green">${cnt("green")} OK</span></div>
+      <p class="tiny muted" style="margin-top:8px">Trié par date de rupture. Le stock baisse tout seul quand tu coches une prise (et remonte si tu la décoches). Rouge : seuil de commande atteint · ambre : seuil dans les 7 jours.</p></div>
+    ${cards}`;
   }
 
   /* ───────────────────────── Nutrition ───────────────────────── */
@@ -612,12 +655,12 @@
     ${window.ShredBackend && window.ShredBackend.configured ? `<div class="card"><h3>Compte</h3>${window.ShredBackend.connected ? `<p class="small muted" style="margin-top:6px">Connecté : ${esc(window.ShredBackend.user ? window.ShredBackend.user.email : "")}</p><button class="btn ghost sm" style="margin-top:8px" data-act="logout">Se déconnecter</button>` : `<p class="small muted" style="margin:6px 0 10px">Identifiants du compte Supabase (créé une seule fois).</p><div class="stack"><input type="email" id="login-email" placeholder="Email" autocomplete="username"><input type="password" id="login-pw" placeholder="Mot de passe" autocomplete="current-password"><button class="btn primary" data-act="login">${UI.loginBusy ? "Connexion…" : "Se connecter"}</button>${UI.loginError ? `<div class="notice red small">${esc(UI.loginError)}</div>` : ""}</div>`}</div>` : ""}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 8 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 9 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
     const unseen = Data.unseenReviews();
-    const items = [["#program", "Programme", "séances, charges, versions", ICON.prog], ["#supps", "Compléments", "prises du jour et fiches", ICON.pill], ["#reviews", "Bilan & ajustements", unseen ? `${unseen} nouveau${unseen > 1 ? "x" : ""}` : "historique des changements", ICON.review], ["#posture", "Routine posture", "5 min / jour", ICON.posture], ["#export", "Export / Import", "CSV, Excel, JSON", ICON.export], ["#settings", "Réglages", "thème, taille, données", ICON.gear]];
+    const items = [["#program", "Programme", "séances, charges, versions", ICON.prog], ["#supps", "Compléments", "prises du jour et fiches", ICON.pill], ["#stock", "Stock", (() => { const n = stockToOrder().length; return n ? `${n} à commander` : "rien à commander"; })(), ICON.pill], ["#reviews", "Bilan & ajustements", unseen ? `${unseen} nouveau${unseen > 1 ? "x" : ""}` : "historique des changements", ICON.review], ["#posture", "Routine posture", "5 min / jour", ICON.posture], ["#export", "Export / Import", "CSV, Excel, JSON", ICON.export], ["#settings", "Réglages", "thème, taille, données", ICON.gear]];
     return `<div class="card"><div class="list">${items.map(([h, t, s, ic]) => `<a class="item" href="${h}" style="text-decoration:none;color:inherit"><span class="ic" style="color:var(--accent);width:26px">${ic}</span><div class="grow"><div class="t">${t}</div><div class="s">${s}</div></div><span class="chev">›</span></a>`).join("")}</div></div>`;
   }
   function renderPosture() {
@@ -678,6 +721,21 @@
       case "sup-toggle": { const date = UI.view === "posture" ? isoDate() : UI.supDate; const log = Store.get("supplementLogs/" + date) || { date, taken: {} }; log.taken[id] = !log.taken[id]; Store.set("supplementLogs/" + date, log); render(); break; }
       case "sup-all": { const plan = Data.supplements(); const date = UI.supDate; const log = Store.get("supplementLogs/" + date) || { date, taken: {} }; const items = plan.items.filter((i) => i.moment === b.dataset.m); const allOn = items.every((i) => log.taken[i.id]); items.forEach((i) => (log.taken[i.id] = !allOn)); Store.set("supplementLogs/" + date, log); render(); break; }
       case "sup-info": UI.supOpen = UI.supOpen === id ? null : id; render(); break;
+      case "stock-ordered": { const l = Data.stockLines().find((x) => x.id === id); if (!l) break; l.orderedAt = l.orderedAt ? null : isoDate(); Data.saveStock(l); toast(l.orderedAt ? `${l.name} : commandé, rappels suspendus` : `${l.name} : rappels réactivés`); render(); break; }
+      case "stock-recv": { const l = Data.stockLines().find((x) => x.id === id); if (!l) break; const st = window.ShredStock.status(l, isoDate(), Data.stockCtx()); const lab = (UNIT_LABEL[l.unit] || [l.unit, l.unit])[1];
+        sheet(`<h3>Reçu — ${esc(l.name)}</h3><p class="small muted" style="margin-top:6px">Combien de ${esc(lab)} as-tu maintenant, au total ? Les prises déjà cochées aujourd'hui sont considérées comme déjà sorties de la boîte. Pré-rempli : restant (${fmtQty(st.unitsLeft, l.unit)}) + une boîte neuve (${fmtQty(l.unitsPerBox, l.unit)}).</p><div class="field" style="margin-top:10px"><label>J'ai (${esc(lab)})</label><input type="number" inputmode="decimal" step="any" min="0" id="stk-units" value="${Math.round((st.unitsLeft + l.unitsPerBox) * 100) / 100}"></div><button class="btn primary wide" style="margin-top:12px" data-act="stock-recv-save" data-id="${l.id}">Enregistrer</button>`); break; }
+      case "stock-recv-save": { const l = Data.stockLines().find((x) => x.id === id); const v = num($("#stk-units").value); if (!l || v == null || v < 0) return toast("Quantité invalide"); Data.saveStock(window.ShredStock.recount(l, v, isoDate(), Data.stockCtx(), true)); closeSheet(); toast(`${l.name} : ${fmtQty(v, l.unit)}`); break; }
+      case "recount-ok": case "recount-save": {
+        const inputs = $$("[data-recount]"); const changed = inputs.filter((el) => num(el.value) !== num(el.dataset.theo));
+        const bad = inputs.find((el) => num(el.value) == null || num(el.value) < 0); if (act === "recount-save" && bad) return toast("Quantité invalide : " + bad.getAttribute("aria-label"));
+        const apply = (useInputs) => { const today = isoDate(); const ctx = Data.stockCtx(); const lines = Data.stockLines(); let n = 0;
+          inputs.forEach((el) => { const l = lines.find((x) => x.id === el.dataset.recount); if (!l) return; const v = useInputs ? num(el.value) : num(el.dataset.theo); if (v !== num(el.dataset.theo)) n++; Data.saveStock(window.ShredStock.recount(l, v, today, ctx)); });
+          toast(n ? `Recomptage enregistré · ${n} ligne${n > 1 ? "s" : ""} corrigée${n > 1 ? "s" : ""}` : "Recomptage enregistré · tout est juste"); location.hash = "#stock"; };
+        if (act === "recount-ok" && changed.length) ask("Ignorer tes corrections ?", `Tu as modifié ${changed.length} ligne(s). « Tout est juste » garde le stock théorique partout.`, "Ignorer et valider", () => apply(false), true);
+        else apply(act === "recount-save"); break; }
+      case "stock-edit": { const l = Data.stockLines().find((x) => x.id === id); if (!l) break; const lab = (UNIT_LABEL[l.unit] || [l.unit, l.unit])[1];
+        sheet(`<h3>Réglages — ${esc(l.name)}</h3><p class="tiny muted" style="margin-top:4px">Unité : ${esc(lab)}. La dose est la consommation totale par jour, toutes prises confondues.</p><div class="grid2" style="margin-top:10px">${[["dosePerDay", `Dose / jour (${lab})`], ["unitsPerBox", `Par boîte (${lab})`], ["leadTimeDays", "Délai de livraison (j)"], ["bufferDays", "Marge de sécurité (j)"]].map(([k, t]) => `<div class="field"><label>${t}</label><input type="number" inputmode="decimal" step="any" min="0" id="stk-${k}" value="${l[k]}"></div>`).join("")}</div><button class="btn primary wide" style="margin-top:12px" data-act="stock-edit-save" data-id="${l.id}">Enregistrer</button>`); break; }
+      case "stock-edit-save": { const l = Data.stockLines().find((x) => x.id === id); if (!l) break; for (const k of ["dosePerDay", "unitsPerBox", "leadTimeDays", "bufferDays"]) { const v = num($("#stk-" + k).value); if (v == null || v < 0 || (k === "dosePerDay" && v === 0)) return toast("Valeur invalide"); l[k] = v; } Data.saveStock(l); closeSheet(); toast("Réglages enregistrés"); break; }
       case "meal-eaten": { const date = UI.nutDate; const log = Store.get("nutritionLogs/" + date) || { date, meals: {} }; log.meals = log.meals || {}; log.meals[id] = log.meals[id] || {}; log.meals[id].eaten = !log.meals[id].eaten; Store.set("nutritionLogs/" + date, log); render(); break; }
       case "meal-edit": mealEditSheet(id); break;
       case "food-del": UI.editFoods.splice(+b.dataset.i, 1); mealEditSheetRefresh(); break;
@@ -697,7 +755,7 @@
       case "exp-summary": copyText(aiSummary(b.dataset.week != null ? +b.dataset.week : null)); break;
       case "imp-program": importJSON($("#imp-json").value, $("#imp-reason").value); render(); break;
       case "set-theme": { const s = Data.settings(); s.theme = b.dataset.v; Data.saveSettings(s); applyTheme(); render(); break; }
-      case "login": { const em = $("#login-email").value.trim(), pw = $("#login-pw").value; if (!em || !pw) { UI.loginError = "Email et mot de passe requis."; render(); break; } UI.loginBusy = true; UI.loginError = ""; b.textContent = "Connexion…"; try { await window.ShredBackend.login(em, pw); UI.loginBusy = false; toast("Connecté"); await Store.connectSupabase(); Store.updateBanner(); render(); } catch (e) { UI.loginBusy = false; UI.loginError = "Connexion refusée : " + (e.message === "Invalid login credentials" ? "email ou mot de passe incorrect." : e.message); render(); const el = $("#login-email"); if (el) el.value = em; } break; }
+      case "login": { const em = $("#login-email").value.trim(), pw = $("#login-pw").value; if (!em || !pw) { UI.loginError = "Email et mot de passe requis."; render(); break; } UI.loginBusy = true; UI.loginError = ""; b.textContent = "Connexion…"; try { await window.ShredBackend.login(em, pw); UI.loginBusy = false; toast("Connecté"); await Store.connectSupabase(); afterConnect(); Store.updateBanner(); render(); } catch (e) { UI.loginBusy = false; UI.loginError = "Connexion refusée : " + (e.message === "Invalid login credentials" ? "email ou mot de passe incorrect." : e.message); render(); const el = $("#login-email"); if (el) el.value = em; } break; }
       case "logout": window.ShredBackend.logout(); Store.db = null; Store.needLogin = true; Store.updateBanner(); render(); break;
       case "resync": Store.pending = new Set(Object.keys(Store.docs)); Store.saveLocal(); await Store.flush(); toast("Synchronisation lancée"); break;
       case "reset-local": ask("Vider le cache local ?", "Les données non encore synchronisées seraient perdues.", "Vider", () => { localStorage.removeItem("shredlog.docs"); localStorage.removeItem("shredlog.pending"); location.reload(); }, true); break;
@@ -749,6 +807,14 @@
   Store.onChange(() => { if (UI.view !== "session" || !activeSession()) render(); else { $("#more-dot").classList.toggle("hidden", Data.unseenReviews() === 0); } Store.updateBanner(); });
   route();
   Store.updateBanner();
-  Store.connect().then(() => { if (Store.db && !Store.get("meta/guide")) Store.set("meta/guide", { purpose: "Schéma de la base Shredlog pour une IA", collections: { "program/current": "programme actif : days[].exercises[] {id, block, sets, reps, rest, primary, machine{ex,kg,lbs,note}, dumbbell{...}}. ex = clé de la bibliothèque (voir data.js) ou custom{name,cues}", "programVersions/vN": "copie de chaque version + savedAt + reason", "sessions/<date>_<dayId>": "séance : status in_progress|done|abandoned, exercises[] {id, variant, targetSets, doneSets, sets[]{kg,lbs,reps,done}, difficulty facile|moyen|difficile, pain, note, skipped}", "measurements/<date>": "poids kg, tours en cm (waistRelaxed, neck, chest, armR...), bodyFat %", "photos/<date>": "face/profil/dos {id,url}", "supplementLogs/<date>": "taken{itemId:true}", "nutritionLogs/<date>": "meals{mealId:{eaten, foods[]}}", "nutrition/plan": "targets{kcal,protein,carbs,fat}, meals[]{id,name,time,foods[]{name,grams,kcal,protein,carbs,fat}}", "supplements/plan": "moments[], items[]{id,name,brand,dose,moment,why,cycle,fat}", "reviews/<id>": "bilan IA : {date, title, summary, changes[]{what,from,to,why}, programVersionFrom, programVersionTo, appliesFrom, seen:false} → l'app affiche une pastille tant que seen=false" }, howToAdjust: "1) lire sessions + measurements ; 2) écrire programVersions/v(N+1) = copie modifiée ; 3) écrire program/current avec version N+1 ; 4) écrire reviews/<date> avec seen:false et la liste des changements. Ne jamais augmenter une charge si pain=true sur l'exercice." }); });
+  const GUIDE = { purpose: "Schéma de la base Shredlog pour une IA", collections: { "program/current": "programme actif : days[].exercises[] {id, block, sets, reps, rest, primary, machine{ex,kg,lbs,note}, dumbbell{...}}. ex = clé de la bibliothèque (voir data.js) ou custom{name,cues}", "programVersions/vN": "copie de chaque version + savedAt + reason", "sessions/<date>_<dayId>": "séance : status in_progress|done|abandoned, exercises[] {id, variant, targetSets, doneSets, sets[]{kg,lbs,reps,done}, difficulty facile|moyen|difficile, pain, note, skipped}", "measurements/<date>": "poids kg, tours en cm (waistRelaxed, neck, chest, armR...), bodyFat %", "photos/<date>": "face/profil/dos {id,url}", "supplementLogs/<date>": "taken{itemId:true}", "nutritionLogs/<date>": "meals{mealId:{eaten, foods[]}}", "nutrition/plan": "targets{kcal,protein,carbs,fat}, meals[]{id,name,time,foods[]{name,grams,kcal,protein,carbs,fat}}", "supplements/plan": "moments[], items[]{id,name,brand,dose,moment,why,cycle,fat, cycleStart,weeksOn,weeksOff,cycleEnabled}", "stock/<id>": "une ligne par boîte réelle : {name, brand, unit capsule|softgel|gramme|ml, unitsLeft (au comptage), lastCountedAt, countExclude[] (cases déjà cochées au comptage), unitsPerBox, dosePerDay, leadTimeDays, bufferDays, orderedAt (null = pas commandé), supplier, takes[]{item, qty} (cases supplementLogs qui la consomment), food (regex d'aliment Nutrition, whey)}. Le restant réel = unitsLeft − prises cochées depuis lastCountedAt (jours OFF exclus), calcul dans stock.js. Oméga-3 = UNE seule ligne (omega1 + omega2).", "reviews/<id>": "bilan IA : {date, title, summary, changes[]{what,from,to,why}, programVersionFrom, programVersionTo, appliesFrom, seen:false} → l'app affiche une pastille tant que seen=false" }, howToAdjust: "1) lire sessions + measurements ; 2) écrire programVersions/v(N+1) = copie modifiée ; 3) écrire program/current avec version N+1 ; 4) écrire reviews/<date> avec seen:false et la liste des changements. Ne jamais augmenter une charge si pain=true sur l'exercice." };
+  // Après connexion à la base : état initial du stock (CSV du 27/09) et guide du schéma.
+  // Jamais avant la connexion, sinon un appareil neuf écraserait le stock réel avec l'état initial.
+  async function afterConnect() {
+    if (!Store.db) return;
+    try { const snap = await Store.db.collection("stock").get(); const have = new Set(snap.docs.map((d) => d.id)); D.STOCK.forEach((l) => { if (!have.has(l.id) && !Store.get("stock/" + l.id)) Store.set("stock/" + l.id, l); }); } catch (e) { console.warn("stock : lecture impossible, pas d'initialisation", e); }
+    const g = Store.get("meta/guide"); if (!g || !g.collections || !g.collections["stock/<id>"]) Store.set("meta/guide", GUIDE);
+  }
+  Store.connect().then(afterConnect);
   window.Shredlog = { Store, Data, UI, render };
 })();

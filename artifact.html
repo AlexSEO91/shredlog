@@ -11,19 +11,19 @@
 <style>
 :root{
   --bg:#F4F3F1;--bg2:#FFFFFF;--bg3:#ECEAE6;--ink:#1A1816;--ink2:#54504B;--ink3:#8A857E;--line:#DEDAD4;
-  --accent:#F28A1D;--accent-ink:#FFFFFF;--accent-soft:#FDEBD6;--accent2:#FFB45C;--amber:#E2A62E;--amber-soft:#FBEFD2;--red:#D0453F;--red-soft:#F9DEDC;--blue:#3A6EA5;
+  --accent:#F28A1D;--accent-ink:#FFFFFF;--accent-soft:#FDEBD6;--accent2:#FFB45C;--amber:#E2A62E;--amber-soft:#FBEFD2;--red:#D0453F;--red-soft:#F9DEDC;--blue:#3A6EA5;--green:#2F8A4E;--green-soft:#DCEFE2;
   --shadow:0 1px 2px rgba(20,30,25,.08),0 6px 20px rgba(20,30,25,.06);
   --r:14px;--rs:9px;
   --font:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;--disp:"Barlow Condensed","Barlow",system-ui,sans-serif;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#151311;--bg2:#1F1C19;--bg3:#2A2622;--ink:#F1EEE9;--ink2:#BDB6AD;--ink3:#847D74;--line:#35302A;
-  --accent:#FF9A2E;--accent-ink:#1A1108;--accent-soft:#3D2A12;--accent2:#FFC27A;--amber:#F0B848;--amber-soft:#3A2F14;--red:#EF6B63;--red-soft:#43221F;--blue:#7FA6D6;
+  --accent:#FF9A2E;--accent-ink:#1A1108;--accent-soft:#3D2A12;--accent2:#FFC27A;--amber:#F0B848;--amber-soft:#3A2F14;--red:#EF6B63;--red-soft:#43221F;--blue:#7FA6D6;--green:#5CC282;--green-soft:#1C3325;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
 }}
 :root[data-theme="dark"]{
   --bg:#151311;--bg2:#1F1C19;--bg3:#2A2622;--ink:#F1EEE9;--ink2:#BDB6AD;--ink3:#847D74;--line:#35302A;
-  --accent:#FF9A2E;--accent-ink:#1A1108;--accent-soft:#3D2A12;--accent2:#FFC27A;--amber:#F0B848;--amber-soft:#3A2F14;--red:#EF6B63;--red-soft:#43221F;--blue:#7FA6D6;
+  --accent:#FF9A2E;--accent-ink:#1A1108;--accent-soft:#3D2A12;--accent2:#FFC27A;--amber:#F0B848;--amber-soft:#3A2F14;--red:#EF6B63;--red-soft:#43221F;--blue:#7FA6D6;--green:#5CC282;--green-soft:#1C3325;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
 }
 *{box-sizing:border-box}
@@ -69,6 +69,9 @@ a{color:var(--accent)}
 .badge.acc{background:var(--accent-soft);color:var(--accent)}
 .badge.amber{background:var(--amber-soft);color:var(--amber)}
 .badge.red{background:var(--red-soft);color:var(--red)}
+.badge.green{background:var(--green-soft);color:var(--green)}
+.stk{border-left:4px solid var(--green)}.stk.amber{border-left-color:var(--amber)}.stk.red{border-left-color:var(--red)}
+.stk .btnrow{margin-top:10px;gap:8px}.stk .btnrow .btn{flex:1 1 0;white-space:nowrap;padding:8px 6px}
 .card{background:var(--bg2);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);margin-bottom:14px}
 .card.flat{box-shadow:none;border:1px solid var(--line)}
 .card.acc{background:var(--accent);color:var(--accent-ink)}
@@ -243,6 +246,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
     <section class="view" id="v-program"></section>
     <section class="view" id="v-track"></section>
     <section class="view" id="v-supps"></section>
+    <section class="view" id="v-stock"></section>
+    <section class="view" id="v-recount"></section>
     <section class="view" id="v-nutrition"></section>
     <section class="view" id="v-reviews"></section>
     <section class="view" id="v-export"></section>
@@ -267,7 +272,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="config.js"></script>
-<script src="backend.js?v=8"></script>
-<script src="data.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="backend.js?v=9"></script>
+<script src="data.js?v=9"></script>
+<script src="stock.js?v=9"></script>
+<script src="app.js?v=9"></script>
 
