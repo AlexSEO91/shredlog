@@ -513,9 +513,12 @@
   function fmtQty(q, unit) { const v = Math.round(q * 100) / 100; const l = UNIT_LABEL[unit] || [unit, unit]; return `${String(v).replace(".", ",")} ${v > 1 ? l[1] : l[0]}`; }
   const LEVEL = { red: ["red", "à commander"], amber: ["amber", "bientôt"], green: ["green", "OK"] };
   function stockToOrder() { return Data.stock().filter((x) => x.st.inAlert && !x.st.ordered); }
+  // Commande groupée (même règle que les notifications) : seuils atteints + même fournisseur à 7 jours.
+  function stockGroup() { return window.ShredStock.orderGroup(Data.stock(), isoDate(), false); }
   function stockBanner() {
-    const todo = stockToOrder(); if (!todo.length) return "";
-    return `<a href="#stock" class="notice red row between" style="text-decoration:none;color:inherit;margin-bottom:14px"><div><b>${todo.length} complément${todo.length > 1 ? "s" : ""} à commander</b><div class="small">${todo.map((x) => esc(x.line.name)).join(", ")}</div></div><span class="chev">›</span></a>`;
+    const g = stockGroup(); if (!g.anchors.length) return "";
+    const n = g.anchors.length;
+    return `<a href="#stock" class="notice red row between" style="text-decoration:none;color:inherit;margin-bottom:14px"><div><b>${n} complément${n > 1 ? "s" : ""} à commander</b><div class="small">${g.anchors.map((x) => esc(x.line.name)).join(", ")}</div>${g.extras.length ? `<div class="small muted">À ajouter à la même commande : ${g.extras.map((x) => esc(x.line.name)).join(", ")}</div>` : ""}</div><span class="chev">›</span></a>`;
   }
   function lastRecount() { const ds = Data.stockLines().filter(window.ShredStock.countable).map((l) => l.lastCountedAt).filter(Boolean).sort(); return ds[0] || null; }
   function renderRecount() {
@@ -529,18 +532,23 @@
   function renderStock() {
     const rows = Data.stock(); const today = isoDate();
     const cnt = (lv) => rows.filter((x) => x.st.level === lv).length;
+    const g = stockGroup(); const extraIds = new Set(g.extras.map((x) => x.line.id));
+    const groupCard = g.anchors.length ? `<div class="card amberc"><b>Commande groupée · ${g.anchors.length + g.extras.length} complément${g.anchors.length + g.extras.length > 1 ? "s" : ""}</b>
+      <div class="small" style="margin-top:4px">Seuil atteint : ${g.anchors.map((x) => esc(x.line.name)).join(", ")}</div>
+      ${g.extras.length ? `<div class="small">À ajouter (seuil dans les 7 jours) : ${g.extras.map((x) => esc(x.line.name)).join(", ")}</div>` : ""}
+      <button class="btn primary wide sm" style="margin-top:10px" data-act="stock-group-ordered">J'ai passé cette commande</button></div>` : "";
     const cards = rows.map(({ line: l, st }) => { const [cls, lab] = LEVEL[st.level];
       return `<div class="card stk ${cls}">
         <div class="row between"><div><b>${esc(l.name)}</b>${st.ordered ? ` <span class="badge">commandé le ${fmtDate(l.orderedAt)}</span>` : ""}${st.off ? ' <span class="badge">pause</span>' : ""}<div class="tiny muted">${esc(l.brand)} · ${esc(l.supplier || "")}</div></div><span class="badge ${cls}">${st.daysLeft == null ? "–" : st.daysLeft + " j"}</span></div>
         <div class="small" style="margin-top:8px">reste <b>${fmtQty(st.unitsLeft, l.unit)}</b> · ${fmtQty(l.dosePerDay, l.unit)}/jour · rupture <b>${st.rupture ? fmtDate(st.rupture) : "–"}</b></div>
-        <div class="tiny muted">${st.inAlert ? `<b style="color:var(--red)">${lab}</b> — seuil du ${fmtDate(st.alertDate)}` : `Commander à partir du ${st.alertDate ? fmtDate(st.alertDate) : "–"}`} · délai ${l.leadTimeDays} j + marge ${l.bufferDays} j · <button class="tiny" style="color:var(--accent);font-weight:600" data-act="stock-edit" data-id="${l.id}">Réglages</button></div>
+        <div class="tiny muted">${st.inAlert ? `<b style="color:var(--red)">${lab}</b> — seuil du ${fmtDate(st.alertDate)}` : extraIds.has(l.id) ? `<b style="color:var(--amber)">à ajouter à la commande</b> — seuil le ${fmtDate(st.alertDate)}` : `Commander à partir du ${st.alertDate ? fmtDate(st.alertDate) : "–"}`} · délai ${l.leadTimeDays} j + marge ${l.bufferDays} j · <button class="tiny" style="color:var(--accent);font-weight:600" data-act="stock-edit" data-id="${l.id}">Réglages</button></div>
         ${l.note ? `<div class="tiny faint" style="margin-top:4px">${esc(l.note)}</div>` : ""}
         <div class="btnrow"><button class="btn sm ${st.ordered ? "line" : st.inAlert ? "primary" : "ghost"}" data-act="stock-ordered" data-id="${l.id}">${st.ordered ? "Annuler « commandé »" : "Recommandé"}</button><button class="btn sm ghost" data-act="stock-recv" data-id="${l.id}">Reçu — j'ai X unités</button></div></div>`; }).join("");
     const last = lastRecount();
     return `<a href="#recount" class="card row between" style="text-decoration:none;color:inherit;padding:12px 14px"><div><b>Recompter mes boîtes</b><div class="small muted">${last ? "plus ancien comptage : " + fmtDate(last) : "jamais recompté"} · une fois par mois</div></div><span class="chev">›</span></a>
     <div class="card"><div class="eyebrow">Stock au ${fmtDate(today)}</div><div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap"><span class="badge red">${cnt("red")} à commander</span><span class="badge amber">${cnt("amber")} bientôt</span><span class="badge green">${cnt("green")} OK</span></div>
       <p class="tiny muted" style="margin-top:8px">Trié par date de rupture. Le stock baisse tout seul quand tu coches une prise (et remonte si tu la décoches). Rouge : seuil de commande atteint · ambre : seuil dans les 7 jours.</p></div>
-    ${cards}`;
+    ${groupCard}${cards}`;
   }
 
   /* ───────────────────────── Nutrition ───────────────────────── */
@@ -700,7 +708,7 @@
     ${pushCard()}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 10 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 11 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
@@ -766,6 +774,7 @@
       case "sup-toggle": { const date = UI.view === "posture" ? isoDate() : UI.supDate; const log = Store.get("supplementLogs/" + date) || { date, taken: {} }; log.taken[id] = !log.taken[id]; Store.set("supplementLogs/" + date, log); render(); break; }
       case "sup-all": { const plan = Data.supplements(); const date = UI.supDate; const log = Store.get("supplementLogs/" + date) || { date, taken: {} }; const items = plan.items.filter((i) => i.moment === b.dataset.m); const allOn = items.every((i) => log.taken[i.id]); items.forEach((i) => (log.taken[i.id] = !allOn)); Store.set("supplementLogs/" + date, log); render(); break; }
       case "sup-info": UI.supOpen = UI.supOpen === id ? null : id; render(); break;
+      case "stock-group-ordered": { const g = stockGroup(); const ids = new Set(g.anchors.concat(g.extras).map((x) => x.line.id)); const today = isoDate(); Data.stockLines().filter((l) => ids.has(l.id)).forEach((l) => Data.saveStock({ ...l, orderedAt: today })); toast(`${ids.size} compléments marqués commandés · rappels suspendus`); render(); break; }
       case "stock-ordered": { const l = Data.stockLines().find((x) => x.id === id); if (!l) break; l.orderedAt = l.orderedAt ? null : isoDate(); Data.saveStock(l); toast(l.orderedAt ? `${l.name} : commandé, rappels suspendus` : `${l.name} : rappels réactivés`); render(); break; }
       case "stock-recv": { const l = Data.stockLines().find((x) => x.id === id); if (!l) break; const st = window.ShredStock.status(l, isoDate(), Data.stockCtx()); const lab = (UNIT_LABEL[l.unit] || [l.unit, l.unit])[1];
         sheet(`<h3>Reçu — ${esc(l.name)}</h3><p class="small muted" style="margin-top:6px">Combien de ${esc(lab)} as-tu maintenant, au total ? Les prises déjà cochées aujourd'hui sont considérées comme déjà sorties de la boîte. Pré-rempli : restant (${fmtQty(st.unitsLeft, l.unit)}) + une boîte neuve (${fmtQty(l.unitsPerBox, l.unit)}).</p><div class="field" style="margin-top:10px"><label>J'ai (${esc(lab)})</label><input type="number" inputmode="decimal" step="any" min="0" id="stk-units" value="${Math.round((st.unitsLeft + l.unitsPerBox) * 100) / 100}"></div><button class="btn primary wide" style="margin-top:12px" data-act="stock-recv-save" data-id="${l.id}">Enregistrer</button>`); break; }

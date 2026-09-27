@@ -21,30 +21,45 @@ const body = (r) => r.messages.map((m) => m.title + " | " + m.body).join(" || ")
 console.log("1. Jours de la semaine (Bangkok)");
 ok(N.weekdayOf("2026-09-27") === 0 && N.weekdayOf("2026-09-30") === 3 && N.weekdayOf("2026-10-04") === 0, "27/09 dimanche, 30/09 mercredi, 04/10 dimanche");
 
-console.log("2. Rattrapage à l'abonnement");
+console.log("2. Rattrapage à l'abonnement (commande groupée)");
 let r = run("catchup", "2026-09-27");
-ok(r.messages.length === 1 && /3 compléments en alerte/.test(r.messages[0].title), "27/09 : 3 items en alerte", body(r));
-ok(/Probiotiques — en rupture \(commandé\)/.test(r.messages[0].body), "probiotiques inclus et signalés « commandé »", body(r));
-ok(!r.logKeys.includes("stock:probio") && r.logKeys.includes("stock:omega3"), "journal : seulement les items non commandés", r.logKeys);
-r = run("catchup", "2026-10-01");
-ok(/5 compléments/.test(r.messages[0].title) && ["Probiotiques", "Collagène", "Oméga-3", "Créatine", "Rhodiola"].every((n) => r.messages[0].body.includes(n)), "01/10 : les 5 items (probio, collagène, oméga, créatine, rhodiola)", body(r));
+const lines = (r) => (r.messages.find((m) => m.tag === "stock") || { body: "" }).body.split("\n");
+ok(r.messages.length === 1 && /commande groupée — 5 compléments/.test(r.messages[0].title), "27/09 : une seule notification, 5 compléments", body(r));
+ok(JSON.stringify(lines(r).map((l) => l.split(" — ")[0])) === JSON.stringify(["Probiotiques", "Collagène", "Oméga-3", "Créatine", "Rhodiola"]), "ordre : seuils atteints puis ajouts", lines(r));
+ok(lines(r)[0] === "Probiotiques — en rupture (commandé)", "probiotiques : en rupture, signalés « commandé »", lines(r)[0]);
+ok(lines(r)[1] === "Collagène — seuil atteint, rupture 10 oct." && lines(r)[2] === "Oméga-3 — seuil atteint, rupture 11 oct.", "collagène + oméga : seuil atteint", lines(r));
+ok(lines(r)[3] === "Créatine — à ajouter à la commande (seuil demain)", "créatine : à ajouter (demain)", lines(r)[3]);
+ok(lines(r)[4] === "Rhodiola — à ajouter à la commande (seuil le 1 oct.)", "rhodiola : à ajouter (01/10)", lines(r)[4]);
+ok(r.logKeys.sort().join() === "stock:collagen,stock:creatine,stock:omega3,stock:rhodiola", "journal : ancres + ajouts non commandés (pas probio)", r.logKeys);
+ok(!/Whey|Tongkat|Théanine/.test(body(r)), "rien au-delà de 7 jours");
 
-console.log("3. Stock du matin (>= seuil, puis tous les 3 jours)");
+console.log("3. Stock du matin (>= seuil, regroupement, puis tous les 3 jours)");
 r = run("morning", "2026-09-27");
-ok(/À commander : 2/.test(body(r)) && !/Probiotiques/.test(body(r)), "27/09 : collagène + oméga (probio commandé exclu)", body(r));
-const after = Object.fromEntries(r.logKeys.map((k) => [k, "2026-09-27"]));
-r = run("morning", "2026-09-28", null, after);
-ok(/Créatine/.test(body(r)), "28/09 : la créatine entre en alerte → rappel groupé immédiat", body(r));
-const log28 = { ...after, ...Object.fromEntries(r.logKeys.map((k) => [k, "2026-09-28"])) };
-r = run("morning", "2026-09-29", null, log28);
-ok(!r.messages.some((m) => m.tag === "stock"), "29/09 : rien de neuf → pas de rappel (< 3 jours)", body(r));
-r = run("morning", "2026-10-01", null, log28);
-ok(r.messages.some((m) => m.tag === "stock" && /Rhodiola/.test(m.body)), "01/10 : rhodiola entre en alerte → rappel", body(r));
-const log01 = { ...log28, ...Object.fromEntries(r.logKeys.map((k) => [k, "2026-10-01"])) };
-ok(!run("morning", "2026-10-03", null, log01).messages.some((m) => m.tag === "stock"), "03/10 : 2 jours après → silence");
-ok(run("morning", "2026-10-04", null, log01).messages.some((m) => m.tag === "stock"), "04/10 : 3 jours après → rappel");
+ok(/À commander — 4 compléments/.test(body(r)) && !/Probiotiques/.test(body(r)) && /Créatine — à ajouter/.test(body(r)) && /Rhodiola — à ajouter/.test(body(r)), "27/09 : collagène + oméga + ajouts créatine, rhodiola (probio commandé exclu)", body(r));
+let logs = Object.fromEntries(r.logKeys.map((k) => [k, "2026-09-27"]));
+const day = (d) => { const x = run("morning", d, null, logs); x.logKeys.forEach((k) => (logs[k] = d)); return x.messages.some((m) => m.tag === "stock"); };
+ok(!day("2026-09-28"), "28/09 : le seuil de la créatine arrive, déjà regroupée → rien");
+ok(!day("2026-09-29"), "29/09 : rien");
+ok(day("2026-09-30"), "30/09 : rappel groupé 3 jours après");
+ok(!day("2026-10-01"), "01/10 : le seuil de la rhodiola arrive, déjà regroupée → rien");
+ok(!day("2026-10-02"), "02/10 : rien");
+ok(day("2026-10-03"), "03/10 : rappel 3 jours après le précédent");
+// Si l'ancre est commandée mais pas l'ajout : l'ajout ne notifie pas tout seul le jour de son seuil…
+logs = { "stock:collagen": "2026-09-27", "stock:omega3": "2026-09-27", "stock:creatine": "2026-09-27", "stock:rhodiola": "2026-09-30" };
+const part = docsUntil("2026-10-01"); ["collagen", "omega3", "creatine"].forEach((id) => (part["stock/" + id] = { ...D.STOCK.find((l) => l.id === id), orderedAt: "2026-09-28" }));
+ok(!run("morning", "2026-10-01", part, logs).messages.some((m) => m.tag === "stock"), "rhodiola incluse le 30/09, seuil le 01/10 → rien");
+ok(run("morning", "2026-10-03", docsUntil("2026-10-03", Object.fromEntries(Object.entries(part).filter(([k]) => k.startsWith("stock/")))), logs).messages.some((m) => m.tag === "stock" && /Rhodiola/.test(m.body)), "… mais le rappel tous les 3 jours continue tant qu'elle n'est pas « recommandée »");
+// Aucun seuil atteint → pas de notification, même avec des seuils à venir
+const calm = { "program/current": PROGRAM }; ["probio", "collagen", "omega3"].forEach((id) => (calm["stock/" + id] = { ...D.STOCK.find((l) => l.id === id), orderedAt: "2026-09-26" }));
+r = run("morning", "2026-09-27", calm);
+ok(!r.messages.some((m) => m.tag === "stock"), "seuils seulement à venir (créatine demain) → rien tant qu'aucun seuil n'est atteint", body(r));
+// Fournisseurs séparés : la whey (Central) n'entre pas dans une commande iHerb
+const wheyNear = docsUntil("2026-09-27", { "stock/whey": { ...D.STOCK.find((l) => l.id === "whey"), unitsLeft: 700 } });
+r = run("morning", "2026-09-27", wheyNear);
+ok(S.status({ ...D.STOCK.find((l) => l.id === "whey"), unitsLeft: 700 }, "2026-09-27", { supLog: () => null, nutLog: () => null, nutPlan: D.NUTRITION, cycleOf: () => null }).alertDate === "2026-09-30", "whey à 700 g : seuil le 30/09 (dans les 7 jours)");
+ok(!/Whey/.test(body(r)), "… mais pas ajoutée à la commande iHerb", body(r));
 const ordered = docsUntil("2026-10-04"); ["collagen", "omega3", "creatine", "rhodiola"].forEach((id) => (ordered["stock/" + id] = { ...D.STOCK.find((l) => l.id === id), orderedAt: "2026-10-02" }));
-ok(!run("morning", "2026-10-04", ordered, log01).messages.some((m) => m.tag === "stock"), "tout marqué « recommandé » → plus de rappel");
+ok(!run("morning", "2026-10-04", ordered, logs).messages.some((m) => m.tag === "stock"), "tout marqué « recommandé » → plus de rappel");
 
 console.log("4. Cycles");
 const cyc = (d) => (run("morning", d, { "program/current": PROGRAM }).messages.find((m) => m.tag === "cycles") || {}).body || "";

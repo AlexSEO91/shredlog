@@ -406,7 +406,23 @@ window.SHRED_DATA = (function () {
   const COUNTABLE = ["capsule", "softgel"];
   const countable = (line) => COUNTABLE.includes(line.unit);
 
-  const api = { isOn, dayUse, status, recount, countable, addDays, diffDays };
+  /* Commande groupée : dès qu'au moins un complément atteint son seuil (« ancre »), on y ajoute ceux du même
+     fournisseur dont le seuil tombe dans les 7 jours suivants (« à ajouter à la commande »), s'ils ne sont pas
+     déjà commandés. Une seule commande iHerb au lieu de plusieurs étalées ; la whey (Central) reste à part.
+     rows = [{line, st}] ; withOrdered = les ancres déjà commandées comptent (rattrapage). */
+  const GROUP_AHEAD = 7;
+  function orderGroup(rows, today, withOrdered) {
+    const byRupture = (a, b) => ((a.st.rupture || "9999") < (b.st.rupture || "9999") ? -1 : 1);
+    const anchors = rows.filter((x) => x.st.inAlert && (withOrdered || !x.st.ordered)).sort(byRupture);
+    if (!anchors.length) return { anchors, extras: [] };
+    const suppliers = new Set(anchors.map((x) => x.line.supplier || ""));
+    const limit = addDays(today, GROUP_AHEAD);
+    const extras = rows.filter((x) => !x.st.inAlert && !x.st.ordered && x.st.alertDate && x.st.alertDate <= limit && suppliers.has(x.line.supplier || ""))
+      .sort((a, b) => (a.st.alertDate < b.st.alertDate ? -1 : 1));
+    return { anchors, extras };
+  }
+
+  const api = { isOn, dayUse, status, recount, countable, orderGroup, addDays, diffDays };
   root.ShredStock = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
@@ -447,14 +463,18 @@ window.SHRED_DATA = (function () {
     return ds[0] || null;
   }
 
-  function stockMessage(rows, catchup) {
-    const n = rows.length;
+  // Une notification = une commande groupée : les ancres (seuil atteint) puis les ajouts (seuil dans les 7 jours).
+  function stockMessage(g, today, catchup) {
+    const n = g.anchors.length + g.extras.length;
+    const anchor = ({ line: l, st }) => `${l.name} — ${st.daysLeft === 0 ? "en rupture" : "seuil atteint, rupture " + (st.rupture ? fmt(st.rupture) : "?")}${st.ordered ? " (commandé)" : ""}`;
+    const extra = ({ line: l, st }) => `${l.name} — à ajouter à la commande (seuil ${st.alertDate === addDays1(today) ? "demain" : "le " + fmt(st.alertDate)})`;
     return {
-      title: catchup ? `Stock : ${n} complément${n > 1 ? "s" : ""} en alerte` : `À commander : ${n} complément${n > 1 ? "s" : ""}`,
-      body: rows.map(({ l, st }) => `${l.name} — ${st.daysLeft === 0 ? "en rupture" : "rupture " + (st.rupture ? fmt(st.rupture) : "?")}${st.ordered ? " (commandé)" : ""}`).join("\n"),
+      title: `${catchup ? "Stock : commande groupée" : "À commander"} — ${n} complément${n > 1 ? "s" : ""}`,
+      body: g.anchors.map(anchor).concat(g.extras.map(extra)).join("\n"),
       url: "#stock", tag: "stock",
     };
   }
+  const addDays1 = (iso) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
 
   function cycleEvents(c, today, S) {
     const seen = new Set(); const out = [];
@@ -475,25 +495,27 @@ window.SHRED_DATA = (function () {
     const c = context(docs, D, S); const wd = weekdayOf(today);
     const messages = []; const logKeys = []; const skipped = [];
     const once = (key, build) => { if (logs[key]) { skipped.push(`${key} : déjà envoyé`); return; } const m = build(); if (m) { messages.push(m); logKeys.push(key); } };
-    const alerts = () => c.lines.map((l) => ({ l, st: S.status(l, today, c.ctx) })).filter((x) => x.st.inAlert).sort((a, b) => ((a.st.rupture || "") < (b.st.rupture || "") ? -1 : 1));
+    const stockRows = () => c.lines.map((line) => ({ line, st: S.status(line, today, c.ctx) }));
     const program = c.get("program/current"); const days = (program && program.days) || [];
     const doneToday = (dayId) => c.list("sessions").some((x) => x.data.date === today && x.data.dayId === dayId && x.data.status === "done");
 
     if (mode === "test") messages.push({ title: "Test Shredlog", body: "Les notifications fonctionnent sur cet appareil.", url: "#settings", tag: "test" });
 
     else if (mode === "catchup") {
-      // Rattrapage : tout ce qui est en zone rouge, même déjà commandé (signalé « commandé »).
-      const rows = alerts();
-      if (rows.length) { messages.push(stockMessage(rows, true)); rows.filter((x) => !x.st.ordered).forEach((x) => logKeys.push("stock:" + x.l.id)); }
+      // Rattrapage : tout ce qui est en zone rouge, même déjà commandé (signalé « commandé »), + les ajouts à 7 jours.
+      const g = S.orderGroup(stockRows(), today, true);
+      if (g.anchors.length) { messages.push(stockMessage(g, today, true)); g.anchors.concat(g.extras).filter((x) => !x.st.ordered).forEach((x) => logKeys.push("stock:" + x.line.id)); }
       else skipped.push("stock : rien en alerte");
     }
 
     else if (mode === "morning") {
       // Stock : dès que aujourd'hui >= seuil, puis tous les 3 jours tant que rien n'est marqué « recommandé ».
-      const rows = alerts().filter((x) => !x.st.ordered);
-      const due = rows.some((x) => !logs["stock:" + x.l.id] || S.diffDays(logs["stock:" + x.l.id], today) >= REMIND_EVERY);
-      if (due) { messages.push(stockMessage(rows, false)); rows.forEach((x) => logKeys.push("stock:" + x.l.id)); }
-      else skipped.push(rows.length ? "stock : rappel déjà envoyé il y a moins de 3 jours" : "stock : rien à commander");
+      // Un item inclus dans un regroupement est journalisé ce jour-là : l'arrivée de son propre seuil ne
+      // déclenche donc rien de plus ; il suit ensuite le rappel tous les 3 jours avec le groupe.
+      const g = S.orderGroup(stockRows(), today, false);
+      const due = g.anchors.some((x) => !logs["stock:" + x.line.id] || S.diffDays(logs["stock:" + x.line.id], today) >= REMIND_EVERY);
+      if (due) { messages.push(stockMessage(g, today, false)); g.anchors.concat(g.extras).forEach((x) => logKeys.push("stock:" + x.line.id)); }
+      else skipped.push(g.anchors.length ? "stock : déjà notifié il y a moins de 3 jours (seul ou dans un regroupement)" : "stock : rien à commander");
       // Cycles : J-3 avant l'arrêt, jour de l'arrêt, veille de reprise, jour de reprise (regroupés par message identique).
       const evs = cycleEvents(c, today, S).filter((e) => { const k = `cycle:${e.id}:${e.type}:${today}`; if (logs[k]) { skipped.push(k + " : déjà envoyé"); return false; } return true; });
       if (evs.length) {

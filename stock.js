@@ -84,7 +84,23 @@
   const COUNTABLE = ["capsule", "softgel"];
   const countable = (line) => COUNTABLE.includes(line.unit);
 
-  const api = { isOn, dayUse, status, recount, countable, addDays, diffDays };
+  /* Commande groupée : dès qu'au moins un complément atteint son seuil (« ancre »), on y ajoute ceux du même
+     fournisseur dont le seuil tombe dans les 7 jours suivants (« à ajouter à la commande »), s'ils ne sont pas
+     déjà commandés. Une seule commande iHerb au lieu de plusieurs étalées ; la whey (Central) reste à part.
+     rows = [{line, st}] ; withOrdered = les ancres déjà commandées comptent (rattrapage). */
+  const GROUP_AHEAD = 7;
+  function orderGroup(rows, today, withOrdered) {
+    const byRupture = (a, b) => ((a.st.rupture || "9999") < (b.st.rupture || "9999") ? -1 : 1);
+    const anchors = rows.filter((x) => x.st.inAlert && (withOrdered || !x.st.ordered)).sort(byRupture);
+    if (!anchors.length) return { anchors, extras: [] };
+    const suppliers = new Set(anchors.map((x) => x.line.supplier || ""));
+    const limit = addDays(today, GROUP_AHEAD);
+    const extras = rows.filter((x) => !x.st.inAlert && !x.st.ordered && x.st.alertDate && x.st.alertDate <= limit && suppliers.has(x.line.supplier || ""))
+      .sort((a, b) => (a.st.alertDate < b.st.alertDate ? -1 : 1));
+    return { anchors, extras };
+  }
+
+  const api = { isOn, dayUse, status, recount, countable, orderGroup, addDays, diffDays };
   root.ShredStock = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
