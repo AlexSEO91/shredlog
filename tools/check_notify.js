@@ -88,9 +88,11 @@ ok(!run("evening", "2026-09-28", { "program/current": noDay }).messages.length, 
 ok(!run("evening", "2026-09-28", null, { "evening:2026-09-28": "2026-09-28" }).messages.length, "déjà envoyé ce soir → pas de doublon");
 
 console.log("6. Bloc cou mercredi 07h30 (ajout 2 : seulement si le bloc existe)");
-r = run("neck", "2026-09-30");
-ok(!r.messages.length && /bloc absent/.test(r.skipped.join()), "programme actuel sans bloc cou → aucun envoi", r.skipped);
-const withNeck = clone(PROGRAM); withNeck.days.push({ id: "neck_short", kind: "neck", weekday: 3, name: "Cou + trapèzes (court)", exercises: [{ id: "x" }] });
+const noNeck = clone(PROGRAM); noNeck.days = noNeck.days.filter((d) => d.kind !== "neck");
+r = run("neck", "2026-09-30", { "program/current": noNeck });
+ok(!r.messages.length && /bloc absent/.test(r.skipped.join()), "programme sans bloc cou → aucun envoi", r.skipped);
+ok(run("neck", "2026-09-30").messages.length === 1, "programme v2 (avec bloc cou le mercredi) → rappel");
+const withNeck = clone(noNeck); withNeck.days.push({ id: "neck_short", kind: "neck", weekday: 3, name: "Cou + trapèzes (court)", exercises: [{ id: "x" }] });
 r = run("neck", "2026-09-30", { "program/current": withNeck });
 ok(r.messages.length === 1 && /Cou \+ trapèzes/.test(r.messages[0].body), "bloc cou présent le mercredi → rappel", body(r));
 ok(!run("neck", "2026-09-29", { "program/current": withNeck }).messages.length, "garde-fou : pas mercredi à Bangkok → aucun envoi");

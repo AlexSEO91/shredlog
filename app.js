@@ -40,11 +40,19 @@
     emit() { this.listeners.forEach((f) => { try { f(); } catch (e) { console.error(e); } }); },
     async flush() {
       if (!this.db || this._flushing) return; this._flushing = true;
-      for (const p of [...this.pending]) {
-        try {
-          if (p.startsWith("-")) await this.db.doc(p.slice(1)).delete(); else if (this.docs[p]) await this.db.doc(p).set(this.docs[p]);
-          this.pending.delete(p);
-        } catch (e) { console.warn("sync fail", p, e); break; }
+      // Boucle jusqu'à ce qu'il ne reste rien : les écritures faites pendant l'envoi partent dans la foulée.
+      let failed = false;
+      while (!failed && this.pending.size) {
+        let progressed = false;
+        for (const p of [...this.pending]) {
+          const sent = p.startsWith("-") ? null : this.docs[p];
+          try {
+            if (p.startsWith("-")) await this.db.doc(p.slice(1)).delete(); else if (sent) await this.db.doc(p).set(sent);
+            // Document modifié pendant son envoi : il reste en attente pour que la dernière version parte aussi.
+            if (p.startsWith("-") || this.docs[p] === sent) { this.pending.delete(p); progressed = true; }
+          } catch (e) { console.warn("sync fail", p, e); failed = true; break; }
+        }
+        if (!progressed) break;
       }
       this.saveLocal(); this._flushing = false; this.updateBanner();
     },
@@ -96,8 +104,12 @@
 
   /* ───────────────────────── Accès aux données ───────────────────────── */
   const Data = {
-    program() { return Store.get("program/current") || null; },
-    ensureProgram() { if (!Store.get("program/current")) { const p = clone(D.PROGRAM); Store.set("program/current", p); Store.set("programVersions/v1", { ...clone(p), savedAt: new Date().toISOString(), reason: "Programme initial (salle : machines + alternatives haltères)" }); } },
+    // Programme actif ; tant que la base n'est pas lue, le programme par défaut (lecture seule, jamais écrit ici).
+    program() { return Store.get("program/current") || (this._def = this._def || clone(D.PROGRAM)); },
+    // Écrit le programme par défaut seulement en mode 100 % local : avec une base, c'est afterConnect() qui décide
+    // (sinon un appareil neuf écraserait le programme et l'historique des versions de la base).
+    willConnect() { return !!((window.claude && window.claude.use) || (window.ShredBackend && window.ShredBackend.configured)); },
+    ensureProgram() { if (this.willConnect()) return; if (!Store.get("program/current")) { const p = clone(D.PROGRAM); Store.set("program/current", p); Store.set("programVersions/v1", { ...clone(p), savedAt: new Date().toISOString(), reason: "Programme initial (salle : machines + alternatives haltères)" }); } },
     settings() { return Store.get("settings/app") || { theme: "auto", heightCm: 172, name: "Alex", unit: "kg", startDate: isoDate() }; },
     saveSettings(s) { Store.set("settings/app", s); },
     supplements() { return Store.get("supplements/plan") || D.SUPPLEMENTS; },
@@ -107,8 +119,17 @@
     stock(today = isoDate()) { const ctx = this.stockCtx(); return this.stockLines().map((l) => ({ line: l, st: window.ShredStock.status(l, today, ctx) })).sort((a, b) => (a.st.rupture || "9999") < (b.st.rupture || "9999") ? -1 : (a.st.rupture || "9999") > (b.st.rupture || "9999") ? 1 : 0); },
     saveStock(line) { Store.set("stock/" + line.id, line); },
     nutrition() { return Store.get("nutrition/plan") || D.NUTRITION; },
-    dayByWeekday(wd) { const p = this.program(); return p ? p.days.find((d) => d.weekday === wd) : null; },
-    dayById(id) { const p = this.program(); return p ? p.days.find((d) => d.id === id) : null; },
+    // Séance principale du jour (le bloc cou est un jour distinct, kind "neck", le même jour de la semaine).
+    dayByWeekday(wd) { const p = this.program(); return p ? p.days.find((d) => d.weekday === wd && d.kind !== "neck") : null; },
+    neckByWeekday(wd) { const p = this.program(); return p ? p.days.find((d) => d.weekday === wd && d.kind === "neck" && d.exercises.length) : null; },
+    // Jour du programme actif, sinon d'une version archivée (séances faites avec un ancien programme).
+    dayById(id) {
+      const p = this.program(); const cur = p ? p.days.find((d) => d.id === id) : null; if (cur) return cur;
+      const vs = Store.list("programVersions").map((x) => x.data).sort((a, b) => (b.version || 0) - (a.version || 0));
+      for (const v of vs) { const d = (v.days || []).find((x) => x.id === id); if (d) return d; }
+      return null;
+    },
+    isCurrentDay(id) { const p = this.program(); return !!(p && p.days.find((d) => d.id === id)); },
     sessions() { return Store.list("sessions").map((x) => x.data).sort((a, b) => (a.date < b.date ? 1 : -1)); },
     lastDoneSession(dayId, beforeDate) { return this.sessions().find((s) => s.dayId === dayId && s.status === "done" && (!beforeDate || s.date < beforeDate)); },
     measurements() { const m = Store.list("measurements").map((x) => x.data); if (!m.find((x) => x.date === D.BASELINE.date)) m.push({ ...D.BASELINE, baseline: true }); return m.sort((a, b) => (a.date < b.date ? -1 : 1)); },
@@ -192,7 +213,8 @@
   /* ───────────────────────── Router ───────────────────────── */
   const VIEWS = { home: "Aujourd'hui", session: "Séance", program: "Programme", track: "Suivi", supps: "Compléments", stock: "Stock", recount: "Recompter", nutrition: "Nutrition", reviews: "Bilan & ajustements", export: "Export / Import", settings: "Réglages", more: "Plus", posture: "Routine posture" };
   function route() {
-    const v = (location.hash || "#home").slice(1).split("?")[0];
+    const [v, q] = (location.hash || "#home").slice(1).split("?");
+    if (v === "session" && q && q.startsWith("day=")) UI.sessionDay = decodeURIComponent(q.slice(4));
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const nv = VIEWS[v] ? v : "home"; if (nv !== UI.view) { UI.sheetHtml = null; UI._confirm = null; } UI.view = nv;
     $$(".view").forEach((el) => el.classList.toggle("on", el.id === "v-" + UI.view));
@@ -234,6 +256,7 @@
     const unseen = Data.unseenReviews();
     const sup = Data.supplements(); const supLog = Store.get("supplementLogs/" + today) || { taken: {} };
     const supDone = sup.items.filter((i) => supLog.taken[i.id]).length;
+    const neck = Data.neckByWeekday(wd); const neckDone = neck && Data.sessions().find((s) => s.date === today && s.dayId === neck.id && s.status === "done");
     const lastM = Data.measurements().slice(-1)[0]; const lastP = Data.photos()[0];
     const daysSince = (s) => s ? Math.round((parseDate(today) - parseDate(s)) / 864e5) : 99;
     let cta;
@@ -264,6 +287,7 @@
         ${wd === 0 || daysSince(lastM && lastM.date) >= 7 ? `<a class="item" href="#track" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">Mensurations de la semaine</div><div class="s">Poids à jeun, tour de taille, bras, cuisses</div></div><span class="chev">›</span></a>` : ""}
         ${daysSince(lastP && lastP.date) >= 7 ? `<a class="item" href="#track?photos" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">Photos face / profil / dos</div><div class="s">Même lumière, même heure, torse nu</div></div><span class="chev">›</span></a>` : ""}
         ${(() => { const lr = lastRecount(); return lr && daysSince(lr) >= 30 ? `<a class="item" href="#recount" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">Recompte tes boîtes</div><div class="s">Dernier comptage il y a ${daysSince(lr)} j · capsules et softgels</div></div><span class="chev">›</span></a>` : ""; })()}
+        ${neck ? `<a class="item" href="#session?day=${neck.id}" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">${esc(neck.name)}${neckDone ? ' <span class="badge acc">fait</span>' : ""}</div><div class="s">${neck.exercises.length} exos · ~${neck.duration} min · tempo 3-1-3</div></div><span class="chev">›</span></a>` : ""}
         <a class="item" href="#posture" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">Routine posture 5 min</div><div class="s">Anti-bascule du bassin, tous les jours</div></div><span class="chev">›</span></a>
         <a class="item" href="#supps" style="text-decoration:none;color:inherit"><div class="grow"><div class="t">Compléments</div><div class="s">${supDone}/${sup.items.length} pris aujourd'hui</div></div><div class="progress" style="width:70px"><i style="width:${Math.round(100 * supDone / sup.items.length)}%"></i></div></a>
       </div>
@@ -271,6 +295,8 @@
   }
 
   /* ───────────────────────── Séance ───────────────────────── */
+  // Libellé de version : « Machine / poulie » et « Haltères » par défaut, ou celui du programme (Barres, Assistées…).
+  function tabLabel(e, vk) { const v = e && e[vk]; return (v && v.tab) || (vk === "machine" ? "Machine / poulie" : "Haltères"); }
   function sessionProgress(s) { const ex = s.exercises.filter((e) => !e.warmup); const done = ex.filter((e) => e.doneSets > 0 || e.skipped).length; return Math.round(100 * done / Math.max(1, ex.length)); }
   function newSession(day) {
     const p = Data.program(); const today = isoDate();
@@ -280,9 +306,9 @@
       const prevEx = prev && prev.exercises.find((x) => x.id === e.id);
       const kg = prevEx && prevEx.variant === variant && prevEx.sets && prevEx.sets[0] && prevEx.sets[0].kg != null ? prevEx.sets[0].kg : (v ? v.kg : null);
       const sets = []; for (let i = 0; i < e.sets; i++) sets.push({ kg, lbs: toLbs(kg), reps: e.reps, done: false });
-      return { id: e.id, block: e.block, superset: e.superset, warmup: e.warmup, variant, targetSets: e.sets, reps: e.reps, rest: e.rest, sets, doneSets: 0, difficulty: "", pain: false, note: "", skipped: false };
+      return { id: e.id, block: e.block, superset: e.superset, warmup: e.warmup, variant, targetSets: e.sets, reps: e.reps, rest: e.rest, tempo: e.tempo || "", name: Data.exInfo(v).name, sets, doneSets: 0, difficulty: "", pain: false, note: "", skipped: false };
     });
-    return { id: `${today}_${day.id}`, date: today, dayId: day.id, dayName: day.name, programVersion: p.version, status: "in_progress", startedAt: new Date().toISOString(), cursor: 0, exercises, note: "" };
+    return { id: `${today}_${day.id}`, date: today, dayId: day.id, dayName: day.name, dayKind: day.kind || "", programVersion: p.version, status: "in_progress", startedAt: new Date().toISOString(), cursor: 0, exercises, note: "" };
   }
   function saveSession(s) { Store.set("sessions/" + s.id, s); }
   function activeSession() { return Data.sessions().find((s) => s.status === "in_progress") || null; }
@@ -291,11 +317,13 @@
     if (s) return renderExercise(s);
     const p = Data.program(); if (!p) return `<div class="card">Programme absent. <button class="btn sm primary" data-act="load-default">Charger le programme</button></div>`;
     const today = isoDate(); const wd = parseDate(today).getDay();
-    const dayId = UI.sessionDay || (Data.dayByWeekday(wd) && !Data.dayByWeekday(wd).rest ? Data.dayByWeekday(wd).id : "lun");
+    const main = Data.dayByWeekday(wd); const firstDay = p.days.find((d) => !d.rest);
+    if (UI.sessionDay && !Data.isCurrentDay(UI.sessionDay)) UI.sessionDay = null; // jour d'un ancien programme
+    const dayId = UI.sessionDay || (main && !main.rest ? main.id : firstDay.id);
     const day = Data.dayById(dayId);
     const doneToday = Data.sessions().find((x) => x.date === today && x.dayId === dayId && x.status === "done");
     const chips = p.days.filter((d) => !d.rest).map((d) => `<button class="chip ${d.id === dayId ? "on" : ""}" data-act="pick-day" data-id="${d.id}">${DAYS_SHORT[d.weekday]} · ${esc(d.name)}</button>`).join("");
-    const list = day.exercises.map((e, i) => { const v = e[e.primary] || e.machine || e.dumbbell; const info = Data.exInfo(v); return `<div class="item"><span class="n">${e.warmup ? "éch." : e.block + (e.superset ? "" : "")}</span><div class="grow"><div class="t">${esc(info.name)}</div><div class="s">${e.warmup ? esc(e.reps) : `${e.sets} × ${esc(e.reps)}${v && v.kg != null ? ` · ${fmtK(v.kg)} kg / ${fmtK(v.lbs)} lbs` : ""}${e.rest ? ` · repos ${e.rest} s` : ""}`}</div></div></div>`; }).join("");
+    const list = day.exercises.map((e, i) => { const v = e[e.primary] || e.machine || e.dumbbell; const info = Data.exInfo(v); return `<div class="item"><span class="n">${e.warmup ? "éch." : e.block + (e.superset ? "" : "")}</span><div class="grow"><div class="t">${esc(info.name)}</div><div class="s">${e.warmup ? esc(e.reps) : `${e.sets} × ${esc(e.reps)}${v && v.kg != null ? ` · ${fmtK(v.kg)} kg / ${fmtK(v.lbs)} lbs` : v && v.note ? ` · ${esc(v.note)}` : ""}${e.rest ? ` · repos ${e.rest} s` : ""}${e.tempo ? ` · tempo ${esc(e.tempo)}` : ""}`}</div></div></div>`; }).join("");
     return `
     <div class="chips" style="margin-bottom:14px">${chips}</div>
     <div class="card">
@@ -306,7 +334,7 @@
     ${doneToday ? `<p class="tiny faint" style="text-align:center;margin-top:8px">Une nouvelle séance remplacera celle d'aujourd'hui pour ce jour.</p>` : ""}`;
   }
   function renderExercise(s) {
-    const day = Data.dayById(s.dayId); const idx = Math.min(s.cursor, s.exercises.length - 1); const se = s.exercises[idx]; const pe = day.exercises.find((e) => e.id === se.id) || {};
+    const day = Data.dayById(s.dayId); const idx = Math.min(s.cursor, s.exercises.length - 1); const se = s.exercises[idx]; const pe = (day && day.exercises.find((e) => e.id === se.id)) || {};
     const total = s.exercises.length; const pct = sessionProgress(s);
     const v = pe[se.variant]; const info = Data.exInfo(v);
     const hasM = !!pe.machine, hasD = !!pe.dumbbell;
@@ -318,10 +346,10 @@
     <div class="pct">${pct} % · exercice ${idx + 1} / ${total}${se.superset ? ` · ${esc(se.superset)}` : ""}</div>
     <div class="progress" style="margin-bottom:12px"><i style="width:${pct}%"></i></div>
     <div class="card" style="padding:12px">
-      ${hasM && hasD ? `<div class="tabs" style="margin-bottom:10px"><button class="${se.variant === "machine" ? "on" : ""}" data-act="variant" data-v="machine">Machine</button><button class="${se.variant === "dumbbell" ? "on" : ""}" data-act="variant" data-v="dumbbell">Sans machine · haltères</button></div>` : ""}
-      ${demoBlock(info, se.variant === "machine" ? "Machine" : "Haltères / PDC")}
+      ${hasM && hasD ? `<div class="tabs" style="margin-bottom:10px"><button class="${se.variant === "machine" ? "on" : ""}" data-act="variant" data-v="machine">${esc(tabLabel(pe, "machine"))}</button><button class="${se.variant === "dumbbell" ? "on" : ""}" data-act="variant" data-v="dumbbell">${esc(tabLabel(pe, "dumbbell"))}</button></div>` : ""}
+      ${demoBlock(info, tabLabel(pe, se.variant))}
       <div class="row between" style="margin-top:12px"><h2 style="font-size:22px">${esc(info.name)}</h2>${se.warmup ? '<span class="badge">échauffement</span>' : `<span class="badge">bloc ${esc(se.block)}</span>`}</div>
-      <p class="muted small" style="margin-top:4px">${se.warmup ? esc(se.reps) : `<b>${se.targetSets} séries × ${esc(se.reps)}</b>${se.rest ? ` · repos ${se.rest} s` : ""}${v && v.kg != null ? ` · ${fmtK(v.kg)} kg / ${fmtK(v.lbs)} lbs` : ""}${v && v.note ? ` · <span class="faint">${esc(v.note)}</span>` : ""}`}${pe.info ? `<br><span class="faint">${esc(pe.info)}</span>` : ""}</p>
+      <p class="muted small" style="margin-top:4px">${se.warmup ? esc(se.reps) : `<b>${se.targetSets} séries × ${esc(se.reps)}</b>${se.rest ? ` · repos ${se.rest} s` : ""}${pe.tempo ? ` · tempo ${esc(pe.tempo)}` : ""}${v && v.kg != null ? ` · ${fmtK(v.kg)} kg / ${fmtK(v.lbs)} lbs` : ""}${v && v.note ? ` · <span class="faint">${esc(v.note)}</span>` : ""}`}${pe.info ? `<br><span class="faint">${esc(pe.info)}</span>` : ""}</p>
       <div style="margin-top:10px">${musclesBlock(info)}</div>
       ${info.cues && info.cues.length ? `<button class="small" style="color:var(--accent);font-weight:600;margin-top:8px" data-act="toggle-cues">${UI.cuesOpen ? "Masquer les consignes" : "Consignes d'exécution"} ›</button>${UI.cuesOpen ? `<ul class="cues">${info.cues.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}` : ""}
     </div>
@@ -369,11 +397,12 @@
     if (UI.progDay) {
       const day = Data.dayById(UI.progDay);
       const ex = day.exercises.map((e) => {
-        const block = (vk, label) => { const v = e[vk]; if (!v) return ""; const info = Data.exInfo(v); return `<div class="card flat" style="padding:10px;margin:8px 0 0"><div class="row between"><b class="small">${label} · ${esc(info.name)}</b><span class="tiny faint">${esc(v.note || "")}</span></div>${e.warmup ? "" : `<div class="grid2" style="margin-top:8px"><div class="field"><label>kg</label><input type="number" step="0.5" inputmode="decimal" value="${v.kg ?? ""}" placeholder="PDC" data-bind="prog-kg" data-ex="${e.id}" data-vk="${vk}"></div><div class="field"><label>lbs</label><input type="number" step="0.5" inputmode="decimal" value="${v.lbs ?? ""}" data-bind="prog-lbs" data-ex="${e.id}" data-vk="${vk}"></div></div>`}</div>`; };
-        return `<div class="card" style="padding:12px"><div class="row between"><div><span class="badge">${e.warmup ? "échauffement" : "bloc " + esc(e.block)}</span> <b>${e.warmup ? esc(e.reps) : `${e.sets} × ${esc(e.reps)}`}</b>${e.rest ? ` <span class="small muted">· repos ${e.rest} s</span>` : ""}</div>${e.superset ? `<span class="tiny faint">${esc(e.superset)}</span>` : ""}</div>
+        const block = (vk) => { const v = e[vk]; if (!v) return ""; const info = Data.exInfo(v); const label = tabLabel(e, vk); return `<div class="card flat" style="padding:10px;margin:8px 0 0"><div class="row between"><b class="small">${esc(label)} · ${esc(info.name)}</b><span class="tiny faint">${esc(v.note || "")}</span></div>${e.warmup ? "" : `<div class="grid2" style="margin-top:8px"><div class="field"><label>kg</label><input type="number" step="0.5" inputmode="decimal" value="${v.kg ?? ""}" placeholder="PDC" data-bind="prog-kg" data-ex="${e.id}" data-vk="${vk}"></div><div class="field"><label>lbs</label><input type="number" step="0.5" inputmode="decimal" value="${v.lbs ?? ""}" data-bind="prog-lbs" data-ex="${e.id}" data-vk="${vk}"></div></div>`}</div>`; };
+        return `<div class="card" style="padding:12px"><div class="row between"><div><span class="badge">${e.warmup ? "échauffement" : "bloc " + esc(e.block)}</span> <b>${e.warmup ? esc(e.reps) : `${e.sets} × ${esc(e.reps)}`}</b>${e.rest ? ` <span class="small muted">· repos ${e.rest} s</span>` : ""}${e.tempo ? ` <span class="small muted">· tempo ${esc(e.tempo)}</span>` : ""}</div>${e.superset ? `<span class="tiny faint">${esc(e.superset)}</span>` : ""}</div>
+          ${e.orig && !e.orig.startsWith("Cou ") ? `<div class="tiny faint" style="margin-top:4px">Programme d'origine : ${esc(e.orig)}</div>` : ""}${e.info ? `<div class="tiny faint" style="margin-top:2px">${esc(e.info)}</div>` : ""}
           <div class="grid2" style="margin-top:6px"><div class="field"><label>Séries</label><input type="number" min="1" max="8" value="${e.sets}" data-bind="prog-sets" data-ex="${e.id}"></div><div class="field"><label>Reps</label><input type="text" value="${esc(e.reps)}" data-bind="prog-reps" data-ex="${e.id}"></div></div>
-          ${block("machine", "Machine")}${block("dumbbell", "Haltères / PDC")}
-          <div class="row" style="margin-top:8px"><span class="small muted">Version par défaut :</span><div class="tabs grow"><button class="${e.primary === "machine" ? "on" : ""}" data-act="prog-primary" data-ex="${e.id}" data-v="machine" ${e.machine ? "" : "disabled"}>Machine</button><button class="${e.primary === "dumbbell" ? "on" : ""}" data-act="prog-primary" data-ex="${e.id}" data-v="dumbbell" ${e.dumbbell ? "" : "disabled"}>Haltères</button></div></div></div>`;
+          ${block("machine")}${block("dumbbell")}
+          <div class="row" style="margin-top:8px"><span class="small muted">Version par défaut :</span><div class="tabs grow"><button class="${e.primary === "machine" ? "on" : ""}" data-act="prog-primary" data-ex="${e.id}" data-v="machine" ${e.machine ? "" : "disabled"}>${esc(tabLabel(e, "machine"))}</button><button class="${e.primary === "dumbbell" ? "on" : ""}" data-act="prog-primary" data-ex="${e.id}" data-v="dumbbell" ${e.dumbbell ? "" : "disabled"}>${esc(tabLabel(e, "dumbbell"))}</button></div></div></div>`;
       }).join("");
       return `<button class="small" style="color:var(--accent);font-weight:600;margin-bottom:10px" data-act="prog-back">‹ Tous les jours</button><h2>${esc(day.name)}</h2><p class="muted small" style="margin-bottom:12px">${esc(day.focus)}</p>${ex}<p class="tiny faint">Les modifications de charges/séries s'enregistrent immédiatement (sans changer le numéro de version).</p>`;
     }
@@ -425,9 +454,22 @@
     <div class="card"><div class="eyebrow" style="margin-bottom:8px">Historique</div><div class="scroll"><table class="tbl"><thead><tr><th>Date</th><th class="r">Poids</th><th class="r">Taille</th><th class="r">Poitrine</th><th class="r">Bras D</th><th class="r">MG %</th><th></th></tr></thead><tbody>${hist}</tbody></table></div></div>`;
   }
   function weekBounds(offset) { const today = isoDate(); const dow = (parseDate(today).getDay() + 6) % 7; const monday = addDays(today, -dow - 7 * offset); return { start: monday, end: addDays(monday, 6) }; }
+  function sessionMatches(s, d) { return s.dayId === d.id || (!Data.isCurrentDay(s.dayId) && s.dayKind !== "neck" && d.kind !== "neck" && parseDate(s.date).getDay() === d.weekday); }
+  // Programme en vigueur une semaine donnée : celui des séances faites (programVersion), sinon — avant la bascule
+  // vers la spec v2 — la dernière version antérieure, sinon le programme actif.
+  function programForWeek(end, sessions) {
+    const versions = Store.list("programVersions").map((x) => x.data); const cur = Data.program();
+    const count = {}; sessions.forEach((s) => { if (s.programVersion != null) count[s.programVersion] = (count[s.programVersion] || 0) + 1; });
+    const pv = Object.keys(count).sort((a, b) => count[b] - count[a])[0];
+    if (pv != null && Number(pv) !== cur.version) { const v = versions.find((x) => Number(x.version) === Number(pv)); if (v && v.days) return v; }
+    const sw = (Store.get("meta/migrations") || {}).programSpecV2;
+    if (sw && end < sw) { const old = versions.filter((x) => x.specId !== D.PROGRAM.specId && x.days).sort((a, b) => b.version - a.version)[0]; if (old) return old; }
+    return cur;
+  }
   function weekStats(offset) {
-    const { start, end } = weekBounds(offset); const p = Data.program(); const planned = p ? p.days.filter((d) => !d.rest) : [];
+    const { start, end } = weekBounds(offset);
     const sessions = Data.sessions().filter((s) => s.date >= start && s.date <= end && s.status === "done");
+    const p = programForWeek(end, sessions); const planned = p ? p.days.filter((d) => !d.rest && d.exercises.length) : [];
     const exs = sessions.flatMap((s) => s.exercises.filter((e) => !e.warmup).map((e) => ({ ...e, session: s })));
     const nameOf = (e) => { const day = Data.dayById(e.session.dayId); const pe = day && day.exercises.find((x) => x.id === e.id); const info = pe ? Data.exInfo(pe[e.variant]) : null; return info ? info.name : e.id; };
     const volume = exs.reduce((a, e) => a + e.sets.filter((x) => x.done).reduce((b, x) => b + (x.kg || 0) * (parseInt(x.reps, 10) || 0), 0), 0);
@@ -437,7 +479,7 @@
     const plannedSets = planned.reduce((a, d) => a + d.exercises.filter((e) => !e.warmup).reduce((b, e) => b + e.sets, 0), 0);
     const doneSets = exs.reduce((a, e) => a + Math.min(e.doneSets, e.targetSets), 0);
     const setPct = plannedSets ? Math.round(100 * doneSets / plannedSets) : 0;
-    return { start, end, planned, sessions, exs, nameOf, volume, m, supPct, plannedSets, doneSets, setPct, missed: planned.filter((d) => !sessions.find((s) => s.dayId === d.id) && addDays(start, (d.weekday + 6) % 7) < isoDate()) };
+    return { start, end, planned, sessions, exs, nameOf, volume, m, supPct, plannedSets, doneSets, setPct, missed: planned.filter((d) => !sessions.find((s) => sessionMatches(s, d)) && addDays(start, (d.weekday + 6) % 7) < isoDate()) };
   }
   function renderWeek() {
     const off = UI.weekOffset || 0; const w = weekStats(off);
@@ -710,7 +752,7 @@
     ${pushCard()}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 12 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 13 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
@@ -748,7 +790,7 @@
       case "load-default": Data.ensureProgram(); render(); break;
       case "pick-day": UI.sessionDay = id; render(); break;
       case "start-session": { const day = Data.dayById(id); const s = newSession(day); Data.sessions().filter((x) => x.status === "in_progress").forEach((x) => { x.status = "abandoned"; x.finishedAt = new Date().toISOString(); saveSession(x); }); UI.cuesOpen = false; UI.summary = null; saveSession(s); render(); break; }
-      case "variant": withSession((s) => { const se = s.exercises[s.cursor]; const day = Data.dayById(s.dayId); const pe = day.exercises.find((e) => e.id === se.id); const v = pe[b.dataset.v]; if (!v) return; se.variant = b.dataset.v; se.sets.forEach((st) => { if (!st.done) { st.kg = v.kg; st.lbs = toLbs(v.kg); } }); }); render(); break;
+      case "variant": withSession((s) => { const se = s.exercises[s.cursor]; const day = Data.dayById(s.dayId); const pe = day && day.exercises.find((e) => e.id === se.id); if (!pe) return; const v = pe[b.dataset.v]; if (!v) return; se.variant = b.dataset.v; se.sets.forEach((st) => { if (!st.done) { st.kg = v.kg; st.lbs = toLbs(v.kg); } }); }); render(); break;
       case "toggle-cues": UI.cuesOpen = !UI.cuesOpen; render(); break;
       case "toggle-set": withSession((s) => { const se = s.exercises[s.cursor]; const i = +b.dataset.i; se.sets[i].done = !se.sets[i].done; se.doneSets = se.sets.filter((x) => x.done).length; }); render(); break;
       case "add-set": withSession((s) => { const se = s.exercises[s.cursor]; const last = se.sets[se.sets.length - 1]; se.sets.push({ kg: last.kg, lbs: last.lbs, reps: last.reps, done: false }); }); render(); break;
@@ -881,13 +923,44 @@
   Store.onChange(() => { if (UI.view !== "session" || !activeSession()) render(); else { $("#more-dot").classList.toggle("hidden", Data.unseenReviews() === 0); } Store.updateBanner(); });
   route();
   Store.updateBanner();
-  const GUIDE = { version: 2, purpose: "Schéma de la base Shredlog pour une IA", collections: { "program/current": "programme actif : days[] {id, weekday 0=dim, name, rest, kind (\"neck\" pour le bloc cou + trapèzes : déclenche la notification du mercredi 07h30 s'il est prévu weekday 3), exercises[] {id, block, sets, reps, rest, primary, machine{ex,kg,lbs,note}, dumbbell{...}}}. ex = clé de la bibliothèque (voir data.js) ou custom{name,cues}", "programVersions/vN": "copie de chaque version + savedAt + reason", "sessions/<date>_<dayId>": "séance : status in_progress|done|abandoned, exercises[] {id, variant, targetSets, doneSets, sets[]{kg,lbs,reps,done}, difficulty facile|moyen|difficile, pain, note, skipped}", "measurements/<date>": "poids kg, tours en cm (waistRelaxed, neck, chest, armR...), bodyFat %", "photos/<date>": "face/profil/dos {id,url}", "supplementLogs/<date>": "taken{itemId:true}", "nutritionLogs/<date>": "meals{mealId:{eaten, foods[]}}", "nutrition/plan": "targets{kcal,protein,carbs,fat}, meals[]{id,name,time,foods[]{name,grams,kcal,protein,carbs,fat}}", "supplements/plan": "moments[], items[]{id,name,brand,dose,moment,why,cycle,fat, cycleStart,weeksOn,weeksOff,cycleEnabled}", "stock/<id>": "une ligne par boîte réelle : {name, brand, unit capsule|softgel|gramme|ml, unitsLeft (au comptage), lastCountedAt, countExclude[] (cases déjà cochées au comptage), unitsPerBox, dosePerDay, leadTimeDays, bufferDays, orderedAt (null = pas commandé), supplier, takes[]{item, qty} (cases supplementLogs qui la consomment), food (regex d'aliment Nutrition, whey)}. Le restant réel = unitsLeft − prises cochées depuis lastCountedAt (jours OFF exclus), calcul dans stock.js. Oméga-3 = UNE seule ligne (omega1 + omega2).", "reviews/<id>": "bilan IA : {date, title, summary, changes[]{what,from,to,why}, programVersionFrom, programVersionTo, appliesFrom, seen:false} → l'app affiche une pastille tant que seen=false" }, howToAdjust: "1) lire sessions + measurements ; 2) écrire programVersions/v(N+1) = copie modifiée ; 3) écrire program/current avec version N+1 ; 4) écrire reviews/<date> avec seen:false et la liste des changements. Ne jamais augmenter une charge si pain=true sur l'exercice." };
+  const GUIDE = { version: 3, purpose: "Schéma de la base Shredlog pour une IA", collections: { "program/current": "programme actif (specId shredlog-spec-v2) : days[] {id, weekday 0=dim, name, focus, duration, rest, slot, kind (\"neck\" pour le bloc cou + trapèzes : déclenche la notification du mercredi 07h30 s'il est prévu weekday 3), exercises[] {id, block, sets, reps, rest, tempo \"2-1-1\" (cou \"3-1-3\"), orig (nom dans le programme d'origine : les 45 exercices doivent rester présents), info, primary, machine{ex,kg,lbs,note,tab}, dumbbell{...}}}. ex = clé de la bibliothèque (voir data.js) ou custom{name,cues}", "programVersions/vN": "copie de chaque version + savedAt + reason", "sessions/<date>_<dayId>": "séance : status in_progress|done|abandoned, exercises[] {id, variant, targetSets, doneSets, sets[]{kg,lbs,reps,done}, difficulty facile|moyen|difficile, pain, note, skipped}", "measurements/<date>": "poids kg, tours en cm (waistRelaxed, neck, chest, armR...), bodyFat %", "photos/<date>": "face/profil/dos {id,url}", "supplementLogs/<date>": "taken{itemId:true}", "nutritionLogs/<date>": "meals{mealId:{eaten, foods[]}}", "nutrition/plan": "targets{kcal,protein,carbs,fat}, meals[]{id,name,time,foods[]{name,grams,kcal,protein,carbs,fat}}", "supplements/plan": "moments[], items[]{id,name,brand,dose,moment,why,cycle,fat, cycleStart,weeksOn,weeksOff,cycleEnabled}", "stock/<id>": "une ligne par boîte réelle : {name, brand, unit capsule|softgel|gramme|ml, unitsLeft (au comptage), lastCountedAt, countExclude[] (cases déjà cochées au comptage), unitsPerBox, dosePerDay, leadTimeDays, bufferDays, orderedAt (null = pas commandé), supplier, takes[]{item, qty} (cases supplementLogs qui la consomment), food (regex d'aliment Nutrition, whey)}. Le restant réel = unitsLeft − prises cochées depuis lastCountedAt (jours OFF exclus), calcul dans stock.js. Oméga-3 = UNE seule ligne (omega1 + omega2).", "meta/migrations": "bascules faites une seule fois (programSpecV2 : date) — ne pas supprimer", "reviews/<id>": "bilan IA : {date, title, summary, changes[]{what,from,to,why}, programVersionFrom, programVersionTo, appliesFrom, seen:false} → l'app affiche une pastille tant que seen=false" }, howToAdjust: "1) lire sessions + measurements ; 2) écrire programVersions/v(N+1) = copie modifiée ; 3) écrire program/current avec version N+1 ; 4) écrire reviews/<date> avec seen:false et la liste des changements. Ne jamais augmenter une charge si pain=true sur l'exercice." };
   // Après connexion à la base : état initial du stock (CSV du 27/09) et guide du schéma.
   // Jamais avant la connexion, sinon un appareil neuf écraserait le stock réel avec l'état initial.
   async function afterConnect() {
     if (!Store.db) return;
     try { const snap = await Store.db.collection("stock").get(); const have = new Set(snap.docs.map((d) => d.id)); D.STOCK.forEach((l) => { if (!have.has(l.id) && !Store.get("stock/" + l.id)) Store.set("stock/" + l.id, l); }); } catch (e) { console.warn("stock : lecture impossible, pas d'initialisation", e); }
+    await migrateProgram();
     const g = Store.get("meta/guide"); if (!g || g.version !== GUIDE.version) Store.set("meta/guide", GUIDE);
+  }
+  // Programme spec v2 (chantier 4) — une seule fois (marqueur meta/migrations), après lecture réussie de la base :
+  // archive le programme actif dans programVersions/v<N>, active le nouveau en v<N+1>, écrit un bilan avec retour arrière.
+  // Le marqueur empêche de rebasculer si l'on restaure ensuite l'ancienne version.
+  async function migrateProgram() {
+    try { await Promise.all(["program", "programVersions", "meta"].map((c) => Store.db.collection(c).get())); } catch (e) { console.warn("programme : lecture impossible, pas de bascule", e); return; }
+    const mig = Store.get("meta/migrations") || {}; if (mig.programSpecV2) return;
+    const cur = Store.get("program/current"); const now = new Date().toISOString(); const today = isoDate();
+    const reason = "Programme spec v2 : PPL × 2 (6 jours) + bloc cou / trapèzes · 45 exercices d'origine conservés";
+    if (!cur) { const p = clone(D.PROGRAM); Store.set("program/current", p); Store.set("programVersions/v" + p.version, { ...clone(p), savedAt: now, reason }); }
+    else if (cur.specId !== D.PROGRAM.specId) {
+      if (!Store.get("programVersions/v" + cur.version)) Store.set("programVersions/v" + cur.version, { ...clone(cur), savedAt: now, reason: "Archive du programme " + (cur.name || "précédent") + " avant la spec v2" });
+      const known = Store.list("programVersions").map((x) => Number(x.data.version) || Number(x.id.slice(1)) || 0);
+      const nv = Math.max(Number(cur.version) || 0, ...known) + 1;
+      const p = { ...clone(D.PROGRAM), version: nv };
+      Store.set("program/current", p);
+      Store.set("programVersions/v" + nv, { ...clone(p), savedAt: now, reason });
+      Store.set(`reviews/${today}_programme-spec-v2`, {
+        date: today, title: "Nouveau programme : PPL × 2 + bloc cou / trapèzes", appliesFrom: today, seen: false, programVersionFrom: cur.version, programVersionTo: nv,
+        summary: "Le programme de la spec v2 remplace « " + (cur.name || "l'ancien programme") + " ». Les 45 exercices du programme d'origine (captures) sont tous présents, les compounds lourds passent en début de séance, 2-3 séries partout, et chaque exercice a une version machine / poulie et une version haltères avec séries, reps, repos, tempo et charge de départ.\nSéance 1 = calibration : les charges sont des points de départ. Le J5 (Legs 2) est reconstruit et reste à valider.",
+        changes: [
+          { what: "Planning", from: "5 jours + repos actif le samedi", to: "6 jours : Push 1, Legs, Pull 1, Push 2, Legs 2, Pull 2 · repos le dimanche", why: "Programme d'origine PPL × 2, orienté esthétique" },
+          { what: "Cou + trapèzes", from: "cou intégré à la séance du mercredi", to: "séance distincte : mercredi matin (court, ~10 min) et samedi après J6 (long, ~18 min)", why: "Le cou répond à la fréquence plutôt qu'au volume ; toujours avec charge, tempo 3-1-3" },
+          { what: "Ordre des exercices", from: "Pendulum squat en fin de J1, adduction en ouverture de J2…", to: "exercices lourds en premier (J1, J2, J3, J4, J6)", why: "Pas de squat lourd après triceps et abdos" },
+          { what: "Séries", from: "1 série sur la plupart des exercices d'origine", to: "2 à 3 séries", why: "Le format 1 série est réservé aux pratiquants capables d'aller réellement à l'échec" },
+          { what: "J5 — Legs 2", from: "capture manquante", to: "reconstruit : dominante ischios / fessiers", why: "À valider" },
+        ],
+      });
+    }
+    Store.set("meta/migrations", { ...mig, programSpecV2: today });
   }
   Store.connect().then(afterConnect);
   window.Shredlog = { Store, Data, UI, render };
