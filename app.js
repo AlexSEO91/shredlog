@@ -223,7 +223,7 @@
       if (cur) { UI.previewDay = id === cur.dayId ? null : id; UI.sessionOverview = true; } else UI.sessionDay = id; // séance en cours : simple consultation
     }
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    const nv = VIEWS[v] ? v : "home"; if (nv !== UI.view) { UI.sheetHtml = null; UI._confirm = null; } UI.view = nv;
+    const nv = VIEWS[v] ? v : "home"; if (nv !== UI.view) { UI.sheetHtml = null; UI._confirm = null; UI.viewEx = null; } UI.view = nv;
     $$(".view").forEach((el) => el.classList.toggle("on", el.id === "v-" + UI.view));
     $$(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.v === UI.view || (UI.view !== "home" && !["session", "track", "nutrition"].includes(UI.view) && a.dataset.v === "more")));
     $("#hdr-title").textContent = VIEWS[UI.view];
@@ -269,7 +269,7 @@
     let cta;
     if (active) cta = `<a class="btn wide" style="background:#fff;color:var(--accent)" href="#session">Reprendre ${esc(active.dayName)} · ${sessionProgress(active)} %</a>`;
     else if (doneToday) cta = `<div class="row"><span class="badge" style="background:rgba(255,255,255,.25);color:#fff">Séance faite ✓</span><span class="small">${esc(doneToday.dayName)} · ${doneToday.exercises.filter((e) => e.doneSets > 0).length} exos</span></div>`;
-    else if (day && !day.rest) cta = `<a class="btn wide" style="background:#fff;color:var(--accent)" href="#session">Commencer ${esc(day.name)} · ${day.exercises.length} exos · ~${day.duration} min</a>`;
+    else if (day && !day.rest) cta = `<a class="btn wide" style="background:#fff;color:var(--accent)" href="#session">Séance du jour : ${esc(day.name)} · ${day.exercises.length} exos · ~${day.duration} min</a>`;
     else cta = `<a class="btn wide" style="background:#fff;color:var(--accent)" href="#posture">Routine posture 5 min</a>`;
     return `${stockBanner()}
     <div class="band">
@@ -324,7 +324,7 @@
     return Data.program().days.filter((d) => !d.rest).map((d) => `<button class="chip ${d.id === selectedId ? "on" : ""}" data-act="${act}" data-id="${d.id}">${DAYS_SHORT[d.weekday]} · ${esc(d.name)}${d.id === runningId ? " · ● en cours" : ""}</button>`).join("");
   }
   function dayCard(day, badge) {
-    const list = day.exercises.map((e, i) => { const v = e[e.primary] || e.machine || e.dumbbell; const info = Data.exInfo(v); return `<div class="item"><span class="n">${e.warmup ? "éch." : e.block + (e.superset ? "" : "")}</span><div class="grow"><div class="t">${esc(info.name)}</div><div class="s">${e.warmup ? esc(e.reps) : `${e.sets} × ${esc(e.reps)}${v && v.kg != null ? ` · ${fmtK(v.kg)} kg / ${fmtK(v.lbs)} lbs` : v && v.note ? ` · ${esc(v.note)}` : ""}${e.rest ? ` · repos ${e.rest} s` : ""}${e.tempo ? ` · tempo ${esc(e.tempo)}` : ""}`}</div></div></div>`; }).join("");
+    const list = day.exercises.map((e, i) => { const v = e[e.primary] || e.machine || e.dumbbell; const info = Data.exInfo(v); return `<button class="item" style="width:100%;text-align:left" data-act="view-ex" data-day="${day.id}" data-ex="${e.id}"><span class="n">${e.warmup ? "éch." : e.block + (e.superset ? "" : "")}</span><div class="grow"><div class="t">${esc(info.name)}</div><div class="s">${e.warmup ? esc(e.reps) : `${e.sets} × ${esc(e.reps)}${v && v.kg != null ? ` · ${fmtK(v.kg)} kg / ${fmtK(v.lbs)} lbs` : v && v.note ? ` · ${esc(v.note)}` : ""}${e.rest ? ` · repos ${e.rest} s` : ""}${e.tempo ? ` · tempo ${esc(e.tempo)}` : ""}`}</div></div><span class="chev">›</span></button>`; }).join("");
     return `<div class="card">
       <div class="row between"><div><h2>${esc(day.name)}</h2><p class="muted small">${esc(day.focus)} · ~${day.duration} min</p></div>${badge || ""}</div>
       <div class="list exlist" style="margin-top:10px">${list}</div>
@@ -332,6 +332,7 @@
   }
   function renderSession() {
     const s = activeSession();
+    if (UI.viewEx) { const vd = Data.dayById(UI.viewEx.dayId); const ve = vd && vd.exercises.find((x) => x.id === UI.viewEx.exId); if (ve) return renderExerciseView(vd, ve); UI.viewEx = null; }
     if (s) { if (UI.previewDay && UI.previewDay !== s.dayId && Data.isCurrentDay(UI.previewDay)) return renderDayPreview(s, Data.dayById(UI.previewDay)); UI.previewDay = null; return UI.sessionOverview ? renderSessionOverview(s) : renderExercise(s); }
     const p = Data.program(); if (!p) return `<div class="card">Programme absent. <button class="btn sm primary" data-act="load-default">Charger le programme</button></div>`;
     const today = isoDate(); const wd = parseDate(today).getDay();
@@ -343,8 +344,32 @@
     return `
     <div class="chips" style="margin-bottom:14px">${dayChips(dayId, "pick-day")}</div>
     ${dayCard(day, doneToday ? '<span class="badge acc">faite aujourd\'hui</span>' : "")}
-    <button class="btn primary wide" data-act="start-session" data-id="${day.id}">${doneToday ? "Refaire la séance" : "Commencer la séance"}</button>
+    <button class="btn primary wide" data-act="start-session" data-id="${day.id}">${day.weekday === wd ? (doneToday ? "Refaire la séance" : "Commencer la séance") : `Commencer ${esc(day.name)} (prévu ${DAYS_FR[day.weekday]})`}</button>
+    <p class="tiny faint" style="text-align:center;margin-top:8px">Toucher un exercice ouvre sa fiche en lecture : seul ce bouton démarre la séance.</p>
     ${doneToday ? `<p class="tiny faint" style="text-align:center;margin-top:8px">Une nouvelle séance remplacera celle d'aujourd'hui pour ce jour.</p>` : ""}`;
+  }
+  // Fiche exercice en lecture seule : image, consignes, séries, reps, repos, tempo, charge prévue.
+  // Aucun champ de saisie, aucun chrono, et jamais de démarrage de séance.
+  function renderExerciseView(day, e) {
+    const vk = UI.viewVariant && e[UI.viewVariant] ? UI.viewVariant : e.primary; const v = e[vk] || e.machine || e.dumbbell; const info = Data.exInfo(v);
+    const list = day.exercises; const idx = list.findIndex((x) => x.id === e.id);
+    const nav = (d, label) => { const x = list[idx + d]; return x ? `<button class="btn line sm" data-act="view-ex" data-day="${day.id}" data-ex="${x.id}">${label}</button>` : `<span></span>`; };
+    const charge = (x) => (x.kg != null ? `${fmtK(x.kg)} kg / ${fmtK(x.lbs)} lbs` : "poids du corps") + (x.note ? ` · ${esc(x.note)}` : "");
+    return `<div class="row between" style="margin-bottom:8px"><button class="small" style="color:var(--accent);font-weight:600;padding:6px 0" data-act="view-ex-back">‹ ${esc(day.name)}</button><span class="badge">lecture seule</span></div>
+    <div class="card" style="padding:12px">
+      ${e.machine && e.dumbbell ? `<div class="tabs" style="margin-bottom:10px"><button class="${vk === "machine" ? "on" : ""}" data-act="view-variant" data-v="machine">${esc(tabLabel(e, "machine"))}</button><button class="${vk === "dumbbell" ? "on" : ""}" data-act="view-variant" data-v="dumbbell">${esc(tabLabel(e, "dumbbell"))}</button></div>` : ""}
+      ${demoBlock(info, tabLabel(e, vk))}
+      <div class="row between" style="margin-top:12px"><h2 style="font-size:22px">${esc(info.name)}</h2><span class="badge">${e.warmup ? "échauffement" : "bloc " + esc(e.block)}</span></div>
+      <div class="list" style="margin-top:8px">
+        ${e.warmup ? `<div class="item"><div class="grow"><div class="s">Durée</div><div class="t">${esc(e.reps)}</div></div></div>` : `
+        <div class="item"><div class="grow"><div class="s">Séries × reps</div><div class="t">${e.sets} × ${esc(e.reps)}</div></div><div class="grow"><div class="s">Repos</div><div class="t">${e.rest} s</div></div><div class="grow"><div class="s">Tempo</div><div class="t">${esc(e.tempo || "–")}</div></div></div>
+        <div class="item"><div class="grow"><div class="s">Charge prévue · ${esc(tabLabel(e, vk))}</div><div class="t">${charge(v)}</div></div></div>`}
+      </div>
+      ${e.orig && !e.orig.startsWith("Cou ") ? `<p class="tiny faint" style="margin-top:6px">Programme d'origine : ${esc(e.orig)}</p>` : ""}${e.info ? `<p class="tiny faint">${esc(e.info)}</p>` : ""}
+      <div style="margin-top:10px">${musclesBlock(info)}</div>
+      ${info.cues && info.cues.length ? `<div class="eyebrow" style="margin-top:12px">Consignes d'exécution</div><ul class="cues">${info.cues.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}
+    </div>
+    <div class="row between">${nav(-1, "‹ Précédent")}<span class="tiny faint">${idx + 1} / ${list.length}</span>${nav(1, "Suivant ›")}</div>`;
   }
   // Consultation d'un autre jour pendant une séance en cours : lecture seule, la séance en cours n'est jamais touchée
   // (pas de bouton « Commencer » ici : démarrer une séance fermerait celle en cours).
@@ -798,7 +823,7 @@
     ${pushCard()}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 16 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 17 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
@@ -834,8 +859,8 @@
       case "close-sheet": closeSheet(); break;
       case "confirm-ok": { const fn = UI._confirm; UI._confirm = null; closeSheet(); if (fn) fn(); break; }
       case "load-default": Data.ensureProgram(); render(); break;
-      case "pick-day": UI.sessionDay = id; render(); break;
-      case "start-session": { const day = Data.dayById(id); const s = newSession(day); Data.sessions().filter((x) => x.status === "in_progress").forEach((x) => { x.status = "abandoned"; x.finishedAt = new Date().toISOString(); saveSession(x); }); UI.cuesOpen = false; UI.summary = null; UI.sessionOverview = false; UI.previewDay = null; saveSession(s); render(); break; }
+      case "pick-day": UI.sessionDay = id; UI.viewEx = null; render(); break;
+      case "start-session": { const day = Data.dayById(id); const s = newSession(day); Data.sessions().filter((x) => x.status === "in_progress").forEach((x) => { x.status = "abandoned"; x.finishedAt = new Date().toISOString(); saveSession(x); }); UI.cuesOpen = false; UI.summary = null; UI.sessionOverview = false; UI.previewDay = null; UI.viewEx = null; saveSession(s); render(); break; }
       case "variant": withSession((s) => { const se = s.exercises[s.cursor]; const day = Data.dayById(s.dayId); const pe = day && day.exercises.find((e) => e.id === se.id); if (!pe) return; const v = pe[b.dataset.v]; if (!v) return; se.variant = b.dataset.v; se.sets.forEach((st) => { if (!st.done) { st.kg = v.kg; st.lbs = toLbs(v.kg); } }); }); render(); break;
       case "toggle-cues": UI.cuesOpen = !UI.cuesOpen; render(); break;
       case "toggle-set": withSession((s) => { const se = s.exercises[s.cursor]; const i = +b.dataset.i; se.sets[i].done = !se.sets[i].done; se.doneSets = se.sets.filter((x) => x.done).length; }); render(); break;
@@ -847,6 +872,9 @@
       case "rest": if (Timer.running()) Timer.stop(); else Timer.start(+b.dataset.s || 60); break;
       case "ex-prev": withSession((s) => { s.cursor = Math.max(0, s.cursor - 1); }); UI.cuesOpen = false; render(); break;
       case "ex-next": { const s = activeSession(); if (!s) break; if (s.cursor >= s.exercises.length - 1) { finishSession(s); render(); summarySheet(s); } else { s.cursor++; saveSession(s); UI.cuesOpen = false; render(); } break; }
+      case "view-ex": UI.viewEx = { dayId: b.dataset.day, exId: b.dataset.ex }; UI.viewVariant = null; render(); window.scrollTo(0, 0); break;
+      case "view-variant": UI.viewVariant = b.dataset.v; render(); break;
+      case "view-ex-back": { const dId = UI.viewEx && UI.viewEx.dayId; UI.viewEx = null; const cur = activeSession(); if (cur && dId && dId !== cur.dayId) UI.previewDay = dId; else if (!cur && dId) UI.sessionDay = dId; render(); window.scrollTo(0, 0); break; }
       case "session-preview": { const cur = activeSession(); UI.previewDay = cur && id === cur.dayId ? null : id; UI.sessionOverview = true; render(); window.scrollTo(0, 0); break; }
       case "session-back": UI.previewDay = null; UI.sessionOverview = true; render(); window.scrollTo(0, 0); break;
       case "session-overview": flushDebounced(); UI.sessionOverview = true; UI.cuesOpen = false; render(); window.scrollTo(0, 0); break;
