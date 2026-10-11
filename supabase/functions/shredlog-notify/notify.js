@@ -5,7 +5,8 @@
    - today : date du jour à Bangkok (YYYY-MM-DD) ; docs : { "collection/id": data } comme dans l'app
    - logs : { clé: "YYYY-MM-DD" du dernier envoi } ; D = SHRED_DATA ; S = ShredStock
    Modes : morning (stock + cycles, 08:00), evening (séance non enregistrée, 20:30),
-           neck (bloc cou du mercredi, 07:30), weekly (mensurations + recomptage mensuel, dimanche 21:00),
+           neck (bloc cou du mercredi, 07:30), measures (mensurations + photos, dimanche 10:00, deux notifications),
+           weekly (recomptage mensuel, 1er dimanche du mois 21:00),
            catchup (rattrapage stock à l'abonnement), test. */
 (function (root) {
   "use strict";
@@ -117,11 +118,21 @@
       }
     }
 
+    else if (mode === "measures") {
+      // Dimanche 10h00 : deux notifications distinctes, chacune seulement si ce n'est pas déjà fait aujourd'hui.
+      if (wd !== 0) skipped.push("mensurations / photos : on n'est pas dimanche à Bangkok");
+      else {
+        if (c.get("measurements/" + today)) skipped.push("mensurations : déjà saisies");
+        else once("measures:" + today, () => ({ title: "Mensurations de la semaine", body: "Poids à jeun, tour de taille, bras, cuisses.", url: "#track", tag: "measures" }));
+        const ph = c.get("photos/" + today) || {};
+        if (["face", "profilG", "profilD", "dos", "profil"].some((k) => ph[k])) skipped.push("photos : déjà prises");
+        else once("photos:" + today, () => ({ title: "Photos de la semaine", body: "Face, profil gauche, profil droit, dos : même lumière, même heure, torse nu.", url: "#track?photos", tag: "photos" }));
+      }
+    }
+
     else if (mode === "weekly") {
       if (wd !== 0) skipped.push("hebdo : on n'est pas dimanche à Bangkok");
       else {
-        if (c.get("measurements/" + today)) skipped.push("mensurations : déjà saisies");
-        else once("weekly:" + today, () => ({ title: "Mensurations de la semaine", body: "Poids à jeun, tour de taille, bras, cuisses + photos face / profils / dos.", url: "#track", tag: "measures" }));
         // Recomptage mensuel : 1er dimanche du mois, sauf si tout a été recompté dans les 7 derniers jours.
         if (Number(today.slice(8)) > 7) skipped.push("recomptage : pas le 1er dimanche du mois");
         else {

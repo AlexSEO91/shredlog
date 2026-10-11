@@ -2,7 +2,7 @@
 // Edge Function shredlog-notify (projet Shredlog zucsemhdglkuifqvhusi).
 //
 // Appels :
-//  - pg_cron (4 passages, voir supabase/notifications.sql) : POST {mode: morning|evening|neck|weekly} + en-tête x-cron-secret
+//  - pg_cron (5 passages, voir supabase/notifications.sql) : POST {mode: morning|evening|neck|measures|weekly} + en-tête x-cron-secret
 //  - l'app, avec le jeton de l'utilisateur connecté : POST {mode: catchup|test}
 // Secret à définir dans Edge Functions → Secrets : VAPID_PRIVATE_KEY.
 // Le secret cron est lu dans Vault (fonction public.shredlog_cron_secret), rien à copier.
@@ -20,7 +20,7 @@ const window = globalThis;
 const D = globalThis.SHRED_DATA, S = globalThis.ShredStock, N = globalThis.ShredNotify;
 const VAPID_PUBLIC_KEY = "BO67--Fy4TjmV936flvXOAOwJv2eO4tqsHZDygQmeTtGUtSRfHtC2mHmLAcKRWpzIU1E84H8mCwIUqULEOQf5eg";
 const VAPID_SUBJECT = "https://alexseo91.github.io/shredlog/";
-const CRON_MODES = ["morning", "evening", "neck", "weekly"];
+const CRON_MODES = ["morning", "evening", "neck", "measures", "weekly"];
 const USER_MODES = ["catchup", "test"];
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -44,7 +44,7 @@ async function loadDocs(db, uid, today) {
     q((x) => x.eq("collection", "supplementLogs").gte("path", "supplementLogs/" + from)),
     q((x) => x.eq("collection", "nutritionLogs").gte("path", "nutritionLogs/" + from)),
     q((x) => x.eq("collection", "sessions").like("path", `sessions/${today}%`)),
-    q((x) => x.eq("path", "measurements/" + today)),
+    q((x) => x.in("path", ["measurements/" + today, "photos/" + today])),
   ]);
   logs.flat().forEach((r) => (docs[r.path] = r.data));
   return docs;

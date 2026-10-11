@@ -102,12 +102,19 @@ const emptyNeck = clone(withNeck); emptyNeck.days[emptyNeck.days.length - 1].exe
 ok(!run("neck", "2026-09-30", { "program/current": emptyNeck }).messages.length, "bloc cou vide → aucun envoi");
 ok(!run("evening", "2026-09-30", { "program/current": { days: [withNeck.days[withNeck.days.length - 1]] } }).messages.length, "le bloc cou seul ne déclenche pas le rappel de 20h30");
 
-console.log("7. Dimanche 21h : mensurations + recomptage mensuel");
+console.log("7. Dimanche 10h : mensurations + photos (2 notifications) · dimanche 21h : recomptage mensuel");
+r = run("measures", "2026-10-04");
+ok(r.messages.map((m) => m.tag).join() === "measures,photos", "dimanche 10h : deux notifications distinctes, mensurations puis photos", body(r));
+ok(r.messages[0].url === "#track" && r.messages[1].url === "#track?photos" && !/photo/i.test(r.messages[0].body), "liens : Suivi et onglet Photos ; le rappel mensurations ne parle plus des photos");
+ok(r.logKeys.join() === "measures:2026-10-04,photos:2026-10-04", "journal : une clé par notification", r.logKeys);
+ok(run("measures", "2026-10-04", docsUntil("2026-10-04", { "measurements/2026-10-04": { weight: 70 } })).messages.map((m) => m.tag).join() === "photos", "mensurations déjà saisies → photos seules");
+ok(run("measures", "2026-10-04", docsUntil("2026-10-04", { "photos/2026-10-04": { profilD: { id: "x" } } })).messages.map((m) => m.tag).join() === "measures", "photos déjà prises → mensurations seules");
+ok(!run("measures", "2026-10-04", null, { "measures:2026-10-04": "2026-10-04", "photos:2026-10-04": "2026-10-04" }).messages.length, "déjà envoyées aujourd'hui → rien");
+ok(!run("measures", "2026-10-05").messages.length, "garde-fou : lundi → aucun rappel mensurations / photos");
 r = run("weekly", "2026-10-04");
-ok(r.messages.map((m) => m.tag).join() === "measures,recount", "04/10 (1er dimanche) : mensurations + « Recompte tes boîtes »", body(r));
-ok(r.messages[1].title === "Recompte tes boîtes" && r.messages[1].url === "#recount", "texte et lien du recomptage");
-ok(run("weekly", "2026-10-11").messages.map((m) => m.tag).join() === "measures", "11/10 (2e dimanche) : mensurations seules");
-ok(!run("weekly", "2026-10-04", docsUntil("2026-10-04", { "measurements/2026-10-04": { weight: 70 } })).messages.some((m) => m.tag === "measures"), "mensurations déjà saisies → pas de rappel");
+ok(r.messages.map((m) => m.tag).join() === "recount", "04/10 21h (1er dimanche) : « Recompte tes boîtes » seul", body(r));
+ok(r.messages[0].title === "Recompte tes boîtes" && r.messages[0].url === "#recount", "texte et lien du recomptage");
+ok(!run("weekly", "2026-10-11").messages.length, "11/10 21h (2e dimanche) : plus rien à 21h");
 const recounted = docsUntil("2026-10-04"); D.STOCK.filter(S.countable).forEach((l) => (recounted["stock/" + l.id] = { ...l, lastCountedAt: "2026-10-01" }));
 ok(!run("weekly", "2026-10-04", recounted).messages.some((m) => m.tag === "recount"), "recompté il y a 3 jours → pas de rappel de recomptage");
 ok(run("weekly", "2026-11-01").messages.some((m) => m.tag === "recount"), "01/11 (1er dimanche de novembre) : recomptage");

@@ -64,25 +64,29 @@ returns bigint language sql security definer set search_path = '' as $$
 $$;
 revoke execute on function shredlog_private.call_notify(text) from public, anon, authenticated;
 
--- ─── Les 4 passages programmés ─────────────────────────────────────────────
+-- ─── Les 5 passages programmés ─────────────────────────────────────────────
 -- ATTENTION : pg_cron programme en UTC. Bangkok = UTC+7 toute l'année (pas d'heure d'été).
 -- Format : minute heure jour-du-mois mois jour-de-semaine (0 = dimanche, 3 = mercredi).
 --   Bangkok mercredi 07:30 = UTC mercredi 00:30  → '30 0 * * 3'   (même jour : 07:30 − 7 h ne passe pas la veille)
 --   Bangkok tous les jours 08:00 = UTC 01:00     → '0 1 * * *'
 --   Bangkok tous les jours 20:30 = UTC 13:30     → '30 13 * * *'
+--   Bangkok dimanche 10:00 = UTC dimanche 03:00  → '0 3 * * 0'    (même jour : 10:00 − 7 h ne passe pas la veille)
 --   Bangkok dimanche 21:00 = UTC dimanche 14:00  → '0 14 * * 0'   (même jour)
--- Double sécurité : l'Edge Function refuse d'envoyer le rappel « cou » hors mercredi et le rappel
--- hebdo hors dimanche, en recalculant elle-même le jour à Bangkok.
+-- Dimanche 10:00 : mensurations + photos (deux notifications). Dimanche 21:00 : « Recompte tes boîtes »
+-- (1er dimanche du mois seulement, décidé par l'Edge Function).
+-- Double sécurité : l'Edge Function refuse d'envoyer le rappel « cou » hors mercredi et les rappels
+-- du dimanche hors dimanche, en recalculant elle-même le jour à Bangkok.
 -- cron.schedule remplace un passage existant du même nom : relancer ce fichier ne crée pas de doublon.
 select cron.schedule('shredlog-neck',    '30 0 * * 3',  $$ select shredlog_private.call_notify('neck') $$);
 select cron.schedule('shredlog-morning', '0 1 * * *',   $$ select shredlog_private.call_notify('morning') $$);
 select cron.schedule('shredlog-evening', '30 13 * * *', $$ select shredlog_private.call_notify('evening') $$);
+select cron.schedule('shredlog-measures','0 3 * * 0',   $$ select shredlog_private.call_notify('measures') $$);
 select cron.schedule('shredlog-weekly',  '0 14 * * 0',  $$ select shredlog_private.call_notify('weekly') $$);
 
 -- ─── Vérification explicite UTC → Bangkok (résultat affiché après Run) ─────
 -- Pour chaque passage : l'heure UTC programmée, convertie en heure de Bangkok par PostgreSQL lui-même,
 -- sur une date réelle (30/09/2026 = mercredi, 04/10/2026 = dimanche).
--- Attendu : 4 lignes, colonne « verdict » = OK partout.
+-- Attendu : 5 lignes, colonne « verdict » = OK partout.
 select v.jobname                                                          as passage,
        j.schedule                                                         as cron_utc,
        to_char(v.t at time zone 'UTC', 'Dy DD/MM HH24:MI')                as heure_utc,
@@ -98,6 +102,7 @@ from (values
   ('shredlog-neck',    '30 0 * * 3',  timestamptz '2026-09-30 00:30:00+00', 3,                'Wed 07:30'),
   ('shredlog-morning', '0 1 * * *',   timestamptz '2026-09-30 01:00:00+00', 3,                'Wed 08:00'),
   ('shredlog-evening', '30 13 * * *', timestamptz '2026-09-30 13:30:00+00', 3,                'Wed 20:30'),
+  ('shredlog-measures','0 3 * * 0',   timestamptz '2026-10-04 03:00:00+00', 0,                'Sun 10:00'),
   ('shredlog-weekly',  '0 14 * * 0',  timestamptz '2026-10-04 14:00:00+00', 0,                'Sun 21:00')
 ) as v(jobname, cron, t, dow_utc, attendu)
 left join cron.job j on j.jobname = v.jobname

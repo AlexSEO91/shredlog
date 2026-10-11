@@ -2,7 +2,7 @@
 // Edge Function shredlog-notify (projet Shredlog zucsemhdglkuifqvhusi).
 //
 // Appels :
-//  - pg_cron (4 passages, voir supabase/notifications.sql) : POST {mode: morning|evening|neck|weekly} + en-tête x-cron-secret
+//  - pg_cron (5 passages, voir supabase/notifications.sql) : POST {mode: morning|evening|neck|measures|weekly} + en-tête x-cron-secret
 //  - l'app, avec le jeton de l'utilisateur connecté : POST {mode: catchup|test}
 // Secret à définir dans Edge Functions → Secrets : VAPID_PRIVATE_KEY.
 // Le secret cron est lu dans Vault (fonction public.shredlog_cron_secret), rien à copier.
@@ -22,6 +22,9 @@ window.SHRED_DATA = (function () {
   const kg = (k) => ({ kg: k, lbs: Math.round(k * 2.20462 * 2) / 2 });
 
   // Bibliothèque d'exercices. id → { name, img (base free-exercise-db), muscles principaux/secondaires (clé carte musculaire), cues }
+  // Vidéo de démo (optionnelle) : videoId = identifiant YouTube, videoStart = départ en secondes, en = nom anglais (recherche de repli).
+  // Cou : « How To Build A Thicker Neck Fast! » (Jeff Nippard), chapitre « Neck Training Routine » à 1:49 — les trois mouvements y sont enchaînés.
+  const NECK_VIDEO = "gimeRpdqWQw", NECK_VIDEO_START = 109;
   const EX = {
     // ── Échauffements
     shoulder_circles: { name: "Rotations d'épaules + mobilité", img: "Shoulder_Circles", primary: ["shoulders"], secondary: ["traps"], cues: ["Grands cercles avant/arrière, 20 s chaque sens", "Puis bras tendus, ouverture poitrine"] },
@@ -50,8 +53,8 @@ window.SHRED_DATA = (function () {
     m_face_pull: { name: "Face pull (corde, poulie haute)", img: "Face_Pull", primary: ["shoulders"], secondary: ["middle back", "traps"], cues: ["Tire la corde vers le visage, coudes hauts", "Écarte les mains en fin de mouvement, omoplates serrées", "Charge légère, contrôle total"] },
     d_reverse_flyes: { name: "Oiseau haltères (arrière d'épaule)", img: "Reverse_Flyes", primary: ["shoulders"], secondary: ["middle back"], cues: ["Buste penché, dos plat", "Ouvre les bras vers l'extérieur, coudes légèrement fléchis", "Pause 1 s en haut, pas d'élan"] },
     m_close_pulldown: { name: "Tirage poulie haute prise serrée", img: "Close-Grip_Front_Lat_Pulldown", primary: ["lats"], secondary: ["biceps", "middle back"], cues: ["Prise en V, tire vers le haut des pecs", "Coudes le long du corps, étirement complet en haut"] },
-    neck_curl_plate: { name: "Flexion du cou lestée (disque sur le front)", img: "Lying_Face_Up_Plate_Neck_Resistance", primary: ["neck"], secondary: [], cues: ["Allongé sur le dos, tête dans le vide au bout du banc", "Disque (2,5-5 kg) sur le front, protégé par une serviette", "Menton vers la poitrine, descente lente 2 s, amplitude complète"] },
-    neck_ext_plate: { name: "Extension du cou lestée (disque sur la nuque)", img: "Lying_Face_Down_Plate_Neck_Resistance", primary: ["neck"], secondary: ["traps"], cues: ["Allongé sur le ventre, tête dans le vide", "Disque tenu sur l'arrière du crâne", "Relève la tête en regardant devant, descente lente"] },
+    neck_curl_plate: { name: "Flexion du cou lestée (disque sur le front)", en: "weighted neck curl", videoId: NECK_VIDEO, videoStart: NECK_VIDEO_START, img: "Lying_Face_Up_Plate_Neck_Resistance", primary: ["neck"], secondary: [], cues: ["Allongé sur le dos, tête dans le vide au bout du banc", "Disque (2,5-5 kg) sur le front, protégé par une serviette", "Menton vers la poitrine, descente lente 2 s, amplitude complète"] },
+    neck_ext_plate: { name: "Extension du cou lestée (disque sur la nuque)", en: "weighted neck extension", videoId: NECK_VIDEO, videoStart: NECK_VIDEO_START, img: "Lying_Face_Down_Plate_Neck_Resistance", primary: ["neck"], secondary: ["traps"], cues: ["Allongé sur le ventre, tête dans le vide", "Disque tenu sur l'arrière du crâne", "Relève la tête en regardant devant, descente lente"] },
     neck_harness: { name: "Cou au harnais (ou machine 4 directions)", img: "Seated_Head_Harness_Neck_Resistance", primary: ["neck"], secondary: ["traps"], cues: ["Harnais + disque ou machine cou de la salle", "Mouvement lent, 12-20 reps, aucune douleur tolérée"] },
     m_seated_calf: { name: "Mollets assis machine (soléaire)", img: "Seated_Calf_Raise", primary: ["calves"], secondary: [], cues: ["Coussin sur les cuisses, étirement complet en bas", "Pause 1 s en haut, tempo lent"] },
     knees_to_chest: { name: "Étirement lombaires (genoux à la poitrine)", img: "Hug_Knees_To_Chest", primary: ["lower back"], secondary: ["glutes"], cues: ["Allongé sur le dos, ramène les deux genoux contre la poitrine", "Bas du dos qui s'écrase au sol, respire lentement 45 s"] },
@@ -160,7 +163,7 @@ window.SHRED_DATA = (function () {
     ez_curl: { name: "Curl barre EZ", img: "EZ-Bar_Curl", primary: ["biceps"], secondary: ["forearms"], cues: ["Coudes collés au corps", "Pas de balancier du buste", "Descente contrôlée jusqu'en bas"] },
     m_seated_calf_press: { name: "Presse à mollets assis (levier)", img: "Calf_Press", primary: ["calves"], secondary: [], cues: ["Avant du pied sur la plateforme, talons dans le vide", "Étirement complet, pause 1 s en bas", "Pousse jusqu'à la pointe des pieds"] },
     m_calf_leg_press: { name: "Mollets à la presse à cuisses", img: "Calf_Press_On_The_Leg_Press_Machine", primary: ["calves"], secondary: [], cues: ["Avant du pied au bas de la plateforme, jambes tendues", "Sécurités de la presse mises", "Amplitude complète, sans rebond"] },
-    neck_side_plate: { name: "Inclinaison latérale du cou lestée", img: "Isometric_Neck_Exercise_-_Sides", primary: ["neck"], secondary: ["traps"], cues: ["Allongé sur le côté, tête dans le vide, disque ou haltère sur la tempe (serviette)", "Oreille vers l'épaule, l'épaule ne monte pas", "Tempo 3-1-3, arrêt immédiat en cas de fourmillement"] },
+    neck_side_plate: { name: "Inclinaison latérale du cou lestée", en: "weighted neck lateral flexion", videoId: NECK_VIDEO, videoStart: NECK_VIDEO_START, img: "Isometric_Neck_Exercise_-_Sides", primary: ["neck"], secondary: ["traps"], cues: ["Allongé sur le côté, tête dans le vide, disque ou haltère sur la tempe (serviette)", "Oreille vers l'épaule, l'épaule ne monte pas", "Tempo 3-1-3, arrêt immédiat en cas de fourmillement"] },
     cable_shrug: { name: "Shrugs prise large (poulie basse)", img: "Cable_Shrugs", primary: ["traps"], secondary: [], cues: ["Barre longue à la poulie basse, prise large", "Monte les épaules vers les oreilles, sans rouler", "Pause 1 s en haut, tempo 3-1-3"] },
     barbell_shrug: { name: "Shrugs prise large (barre)", img: "Barbell_Shrug", primary: ["traps"], secondary: [], cues: ["Prise plus large que les épaules", "Bras tendus, seules les épaules montent", "Pause 1 s en haut, tempo 3-1-3"] },
     farmers_walk: { name: "Farmer's walk", img: "Farmers_Walk", primary: ["traps", "forearms"], secondary: ["abdominals", "shoulders"], cues: ["Haltères lourds le long du corps, épaules basses et en arrière", "Petits pas rapides, buste droit, 40 s", "Pose les haltères avant de lâcher la prise"] },
@@ -190,7 +193,7 @@ window.SHRED_DATA = (function () {
   const PROGRAM = {
     name: "Shredlog v2 — PPL × 2 + cou / trapèzes",
     specId: "shredlog-spec-v2",
-    version: 5,
+    version: 6,
     createdAt: "2026-09-27",
     notes: [
       "Tempo 2-1-1 partout (2 s descente, 1 s pause, 1 s montée). Bloc cou + trapèzes : 3-1-3, jamais de mouvement balistique.",
@@ -283,33 +286,34 @@ window.SHRED_DATA = (function () {
         ],
       },
       {
-        id: "j6", weekday: 6, name: "J6 — Pull 2", focus: "Dos · arrière d'épaule · biceps · mollets", duration: 70,
+        id: "j6", weekday: 6, name: "J6 — Pull 2", focus: "Dos · trapèzes · arrière d'épaule · biceps · mollets", duration: 76,
         exercises: [
           warm("j6_w"),
           ex("j6_1", { block: "1", orig: "Wide grip pull ups", sets: 3, reps: "max (viser 5-10)", rest: 120, machine: { ex: "pullup_wide", kg: null, note: "poids du corps", tab: "Barre" }, dumbbell: { ex: "m_assisted_pullup", kg: 20, note: "assistance −20 kg, prise large", tab: "Assistées" } }),
           ex("j6_2", { block: "2", orig: "Cable Row - Wide Grip", sets: 3, reps: "10-15", rest: 90, machine: { ex: "m_wide_cable_row", kg: 35, note: "charge totale" }, dumbbell: { ex: "d_one_arm_row", kg: 14, note: "1 haltère" } }),
           ex("j6_3", { block: "3", orig: "Wide grip lat pulldown", sets: 2, reps: "10-12", rest: 75, machine: { ex: "m_lat_pulldown", kg: 35, note: "charge totale" }, dumbbell: { ex: "d_bent_row", kg: 12, note: "par main" } }),
           ex("j6_4", { block: "4", orig: "Straight arm push down", sets: 2, reps: "10-12", rest: 60, machine: { ex: "m_straight_arm_rope", kg: 20, note: "charge totale" }, dumbbell: { ex: "d_pullover", kg: 10, note: "1 haltère" } }),
-          ex("j6_5", { block: "5", orig: "Cable Rear Delt Fly", sets: 3, reps: "10-15", rest: 45, machine: { ex: "m_cable_rear_fly", kg: 7.5, note: "par côté" }, dumbbell: { ex: "d_seated_rear_raise", kg: 5, note: "par main" } }),
-          ex("j6_6", { block: "6", orig: "Dumbbell Hammer Grip Incline curl", sets: 3, reps: "10-12", rest: 60, primary: "dumbbell", dumbbell: { ex: "d_incline_hammer", kg: 8, note: "par main" }, machine: { ex: "m_hammer_rope", kg: 15, note: "charge totale" } }),
-          ex("j6_7", { block: "7", orig: "Lever Preacher Curl", sets: 2, reps: "6-15", rest: 60, machine: { ex: "m_preacher", kg: 15, note: "charge totale" }, dumbbell: { ex: "d_preacher", kg: 8, note: "par main" } }),
-          ex("j6_8", { block: "8", orig: "Barbell curl Z bar", sets: 2, reps: "5-12", rest: 60, machine: { ex: "ez_curl", kg: 15, note: "barre incluse", tab: "Barre EZ" }, dumbbell: { ex: "d_curl_alt", kg: 10, note: "par main" } }),
-          ex("j6_9", { block: "9", orig: "Lever Seated Calf Raise Plate", sets: 2, reps: "10-15", rest: 45, machine: { ex: "m_seated_calf", kg: 20, note: "disques" }, dumbbell: { ex: "d_seated_calf", kg: 15, note: "haltère sur les genoux" } }),
-          ex("j6_10", { block: "10", orig: "Lever Seated Calf Press", sets: 2, reps: "12-15", rest: 45, machine: { ex: "m_seated_calf_press", kg: 40, note: "charge totale" }, dumbbell: { ex: "m_calf_leg_press", kg: null, note: "charge à calibrer", tab: "Presse à cuisses" } }),
+          // Ajout (spec, J6 ligne 5), hors des 45 exercices d'origine : shrugs lourds sortis du bloc cou du samedi, après le dos lourd.
+          ex("j6_shrug", { block: "5", sets: 4, reps: "12-15", rest: 60, primary: "dumbbell", info: "Trapèzes prioritaires : shrugs lourds suivis comme un vrai exercice (ajout hors programme d'origine).", dumbbell: { ex: "d_shrug", kg: 16, note: "par main" }, machine: { ex: "m_shrug", kg: null, note: "machine à shrugs / Smith, à calibrer" } }),
+          ex("j6_5", { block: "6", orig: "Cable Rear Delt Fly", sets: 3, reps: "10-15", rest: 45, machine: { ex: "m_cable_rear_fly", kg: 7.5, note: "par côté" }, dumbbell: { ex: "d_seated_rear_raise", kg: 5, note: "par main" } }),
+          ex("j6_6", { block: "7", orig: "Dumbbell Hammer Grip Incline curl", sets: 3, reps: "10-12", rest: 60, primary: "dumbbell", dumbbell: { ex: "d_incline_hammer", kg: 8, note: "par main" }, machine: { ex: "m_hammer_rope", kg: 15, note: "charge totale" } }),
+          ex("j6_7", { block: "8", orig: "Lever Preacher Curl", sets: 2, reps: "6-15", rest: 60, machine: { ex: "m_preacher", kg: 15, note: "charge totale" }, dumbbell: { ex: "d_preacher", kg: 8, note: "par main" } }),
+          ex("j6_8", { block: "9", orig: "Barbell curl Z bar", sets: 2, reps: "5-12", rest: 60, machine: { ex: "ez_curl", kg: 15, note: "barre incluse", tab: "Barre EZ" }, dumbbell: { ex: "d_curl_alt", kg: 10, note: "par main" } }),
+          ex("j6_9", { block: "10", orig: "Lever Seated Calf Raise Plate", sets: 2, reps: "10-15", rest: 45, machine: { ex: "m_seated_calf", kg: 20, note: "disques" }, dumbbell: { ex: "d_seated_calf", kg: 15, note: "haltère sur les genoux" } }),
+          ex("j6_10", { block: "11", orig: "Lever Seated Calf Press", sets: 2, reps: "12-15", rest: 45, machine: { ex: "m_seated_calf_press", kg: 40, note: "charge totale" }, dumbbell: { ex: "m_calf_leg_press", kg: null, note: "charge à calibrer", tab: "Presse à cuisses" } }),
         ],
       },
       {
-        id: "cou_sam", kind: "neck", weekday: 6, slot: "après J6", name: "Cou + trapèzes — long (après J6)", focus: "~18 min en fin de séance · tempo 3-1-3 · avec charge", duration: 18,
+        id: "cou_sam", kind: "neck", weekday: 6, slot: "après J6", name: "Cou + trapèzes — long (après J6)", focus: "~13 min en fin de séance · tempo 3-1-3 · avec charge", duration: 13,
         exercises: [
           N("cou_sam_a", { block: "A", orig: "Cou long A — Flexion de cou", sets: 3, reps: "15-20", rest: 45, dumbbell: { ex: "neck_curl_plate", kg: 2.5, note: "2,5 → 5 kg · disque sur le front, serviette pliée · semaine 1 sans charge" }, machine: HARNESS }),
           N("cou_sam_b", { block: "B", orig: "Cou long B — Extension de cou", sets: 3, reps: "15-20", rest: 45, dumbbell: { ex: "neck_ext_plate", kg: 2.5, note: "2,5 → 5 kg · disque sur la nuque · semaine 1 sans charge" }, machine: HARNESS }),
           N("cou_sam_c", { block: "C", orig: "Cou long C — Inclinaison latérale", sets: 2, reps: "12-15 / côté", rest: 45, dumbbell: { ex: "neck_side_plate", kg: 2.5, note: "disque ou haltère sur la tempe · semaine 1 sans charge" }, machine: HARNESS }),
-          N("cou_sam_d", { block: "D", orig: "Cou long D — Shrugs haltères", sets: 4, reps: "12-15", rest: 60, dumbbell: { ex: "d_shrug", kg: 16, note: "par main" }, machine: { ex: "m_shrug", kg: null, note: "machine à shrugs / Smith, à calibrer" } }),
-          N("cou_sam_e", { block: "E", orig: "Cou long E — Shrugs prise large barre ou poulie", sets: 2, reps: "15-20", rest: 45, primary: "machine", machine: { ex: "cable_shrug", kg: 20, note: "poulie basse", tab: "Poulie" }, dumbbell: { ex: "barbell_shrug", kg: 20, note: "barre incluse", tab: "Barre" } }),
-          N("cou_sam_f", { block: "F", orig: "Cou long F — Farmer's walk", sets: 3, reps: "40 s", rest: 60, tempo: "marche contrôlée", dumbbell: { ex: "farmers_walk", kg: 20, note: "par main, 40 s de marche" }, machine: { ex: "shrug_hold", kg: null, note: "tenue 40 s, à calibrer", tab: "Machine" } }),
+          N("cou_sam_e", { block: "D", orig: "Cou long D — Shrugs prise large barre ou poulie", sets: 2, reps: "15-20", rest: 45, primary: "machine", machine: { ex: "cable_shrug", kg: 20, note: "poulie basse", tab: "Poulie" }, dumbbell: { ex: "barbell_shrug", kg: 20, note: "barre incluse", tab: "Barre" } }),
+          N("cou_sam_f", { block: "E", orig: "Cou long E — Farmer's walk", sets: 3, reps: "40 s", rest: 60, tempo: "marche contrôlée", dumbbell: { ex: "farmers_walk", kg: 20, note: "par main, 40 s de marche" }, machine: { ex: "shrug_hold", kg: null, note: "tenue 40 s, à calibrer", tab: "Machine" } }),
         ],
       },
-      { id: "dim", weekday: 0, name: "Repos", focus: "Mensurations et photos à 21h", duration: 0, rest: true, exercises: [] },
+      { id: "dim", weekday: 0, name: "Repos", focus: "Mensurations et photos à 10h", duration: 0, rest: true, exercises: [] },
     ],
     posture: [
       { name: "Étirement fléchisseurs de hanche", ex: "hip_flexor_stretch", dur: "45 s / côté" },
@@ -566,7 +570,8 @@ window.SHRED_DATA = (function () {
    - today : date du jour à Bangkok (YYYY-MM-DD) ; docs : { "collection/id": data } comme dans l'app
    - logs : { clé: "YYYY-MM-DD" du dernier envoi } ; D = SHRED_DATA ; S = ShredStock
    Modes : morning (stock + cycles, 08:00), evening (séance non enregistrée, 20:30),
-           neck (bloc cou du mercredi, 07:30), weekly (mensurations + recomptage mensuel, dimanche 21:00),
+           neck (bloc cou du mercredi, 07:30), measures (mensurations + photos, dimanche 10:00, deux notifications),
+           weekly (recomptage mensuel, 1er dimanche du mois 21:00),
            catchup (rattrapage stock à l'abonnement), test. */
 (function (root) {
   "use strict";
@@ -678,11 +683,21 @@ window.SHRED_DATA = (function () {
       }
     }
 
+    else if (mode === "measures") {
+      // Dimanche 10h00 : deux notifications distinctes, chacune seulement si ce n'est pas déjà fait aujourd'hui.
+      if (wd !== 0) skipped.push("mensurations / photos : on n'est pas dimanche à Bangkok");
+      else {
+        if (c.get("measurements/" + today)) skipped.push("mensurations : déjà saisies");
+        else once("measures:" + today, () => ({ title: "Mensurations de la semaine", body: "Poids à jeun, tour de taille, bras, cuisses.", url: "#track", tag: "measures" }));
+        const ph = c.get("photos/" + today) || {};
+        if (["face", "profilG", "profilD", "dos", "profil"].some((k) => ph[k])) skipped.push("photos : déjà prises");
+        else once("photos:" + today, () => ({ title: "Photos de la semaine", body: "Face, profil gauche, profil droit, dos : même lumière, même heure, torse nu.", url: "#track?photos", tag: "photos" }));
+      }
+    }
+
     else if (mode === "weekly") {
       if (wd !== 0) skipped.push("hebdo : on n'est pas dimanche à Bangkok");
       else {
-        if (c.get("measurements/" + today)) skipped.push("mensurations : déjà saisies");
-        else once("weekly:" + today, () => ({ title: "Mensurations de la semaine", body: "Poids à jeun, tour de taille, bras, cuisses + photos face / profils / dos.", url: "#track", tag: "measures" }));
         // Recomptage mensuel : 1er dimanche du mois, sauf si tout a été recompté dans les 7 derniers jours.
         if (Number(today.slice(8)) > 7) skipped.push("recomptage : pas le 1er dimanche du mois");
         else {
@@ -706,7 +721,7 @@ window.SHRED_DATA = (function () {
 const D = globalThis.SHRED_DATA, S = globalThis.ShredStock, N = globalThis.ShredNotify;
 const VAPID_PUBLIC_KEY = "BO67--Fy4TjmV936flvXOAOwJv2eO4tqsHZDygQmeTtGUtSRfHtC2mHmLAcKRWpzIU1E84H8mCwIUqULEOQf5eg";
 const VAPID_SUBJECT = "https://alexseo91.github.io/shredlog/";
-const CRON_MODES = ["morning", "evening", "neck", "weekly"];
+const CRON_MODES = ["morning", "evening", "neck", "measures", "weekly"];
 const USER_MODES = ["catchup", "test"];
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -730,7 +745,7 @@ async function loadDocs(db, uid, today) {
     q((x) => x.eq("collection", "supplementLogs").gte("path", "supplementLogs/" + from)),
     q((x) => x.eq("collection", "nutritionLogs").gte("path", "nutritionLogs/" + from)),
     q((x) => x.eq("collection", "sessions").like("path", `sessions/${today}%`)),
-    q((x) => x.eq("path", "measurements/" + today)),
+    q((x) => x.in("path", ["measurements/" + today, "photos/" + today])),
   ]);
   logs.flat().forEach((r) => (docs[r.path] = r.data));
   return docs;

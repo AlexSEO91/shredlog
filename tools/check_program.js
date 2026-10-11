@@ -19,7 +19,8 @@ function table(title, until) {
   return spec.slice(i, end).split("\n").filter((l) => /^\|\s*[0-9A-F]+\s*\|/.test(l)).map((l) => {
     const c = l.split("|").slice(1, -1).map((x) => x.trim());
     const [sets, reps, rest, charge] = c.slice(-4);
-    return { pos: c[0], name: (c[1].match(/\*\*(.+?)\*\*/) || [, c[1]])[1].trim(), dbPrimary: c[2].includes("(exercice haltères)"), sets, reps, rest, charge, raw: l };
+    // Nom en gras = exercice du programme d'origine ; sans gras = ajout (« Nom *(motif)* »).
+    return { pos: c[0], bold: /\*\*/.test(c[1]), name: (c[1].match(/\*\*(.+?)\*\*/) || [, c[1].replace(/\*\(.*?\)\*/g, "")])[1].trim(), dbPrimary: c[2].includes("(exercice haltères)"), sets, reps, rest, charge, raw: l };
   });
 }
 const SPEC_DAYS = [
@@ -40,13 +41,15 @@ for (const sd of SPEC_DAYS) {
   const day = P.days.find((d) => d.id === sd.id);
   if (!day) { ok(false, `jour ${sd.id} absent du programme`); continue; }
   const exs = day.exercises.filter((e) => !e.warmup);
-  ok(exs.length === rows.length, `${day.name} : ${rows.length} exercices dans la spec, ${exs.length} dans l'app`);
-  if (sd.original) originalCount += rows.length;
+  if (sd.original) originalCount += rows.filter((r) => r.bold).length;
   rows.forEach((r, i) => {
     const e = exs[i]; const tag = `${day.name} #${r.pos} ${r.name}`;
     if (!e) return ok(false, `${tag} : ABSENT`);
     const expectOrig = sd.neck ? `${sd.neck} ${r.pos} — ` : r.name;
-    ok(sd.neck ? e.orig.startsWith(expectOrig) : e.orig === r.name, `${tag} : mauvais exercice à cette position (${e.orig})`);
+    const added = sd.original && !r.bold; // ajout dans un jour d'origine : pas de trace « orig », identifié par le nom de la bibliothèque
+    if (added) ok(!e.orig && D.EX[e[e.primary].ex] && D.EX[e[e.primary].ex].name === r.name, `${tag} : ajout attendu à cette position (${e.orig || e[e.primary].ex})`);
+    else ok(sd.neck ? e.orig.startsWith(expectOrig) : e.orig === r.name, `${tag} : mauvais exercice à cette position (${e.orig})`);
+    ok(e.block === r.pos, `${tag} : bloc ${e.block} ≠ position ${r.pos}`);
     if (sd.original && e.orig === r.name) found.push(`${sd.id}:${r.name}`);
     // séries (« 2 /côté » → 2 séries, reps « … / côté »)
     const sets = parseInt(r.sets, 10);
@@ -70,7 +73,7 @@ for (const sd of SPEC_DAYS) {
 ok(originalCount === 45, `la spec liste ${originalCount} exercices d'origine (45 attendus)`);
 ok(found.length === 45, `${found.length} / 45 exercices d'origine retrouvés à leur place`);
 const origInProgram = P.days.filter((d) => ["j1", "j2", "j3", "j4", "j6"].includes(d.id)).flatMap((d) => d.exercises.filter((e) => !e.warmup));
-ok(origInProgram.length === 45 && origInProgram.every((e) => e.orig), `programme : ${origInProgram.length} exercices sur J1-J4 + J6, tous tracés`);
+ok(origInProgram.filter((e) => e.orig).length === 45, `programme : ${origInProgram.filter((e) => e.orig).length} exercices d'origine tracés sur J1-J4 + J6`);
 
 console.log("2. Chaque exercice : 2 versions, séries, reps, repos, tempo, charge, image");
 for (const d of P.days) for (const e of d.exercises) {
@@ -93,7 +96,9 @@ ok(main(0).length === 1 && main(0)[0].rest, "dimanche = repos");
 const neck = P.days.filter((d) => d.kind === "neck");
 ok(neck.map((d) => `${d.id}@${d.weekday}`).join() === "cou_mer@3,cou_sam@6", "bloc cou = jour distinct : court le mercredi, long le samedi", neck.map((d) => d.id + "@" + d.weekday));
 ok(P.days.every((d) => d.rest || d.kind === "neck" || d.exercises[0].warmup), "échauffement en tête de chaque séance");
-ok(P.specId === "shredlog-spec-v2" && P.version === 5, "programme marqué spec v2, version 5");
+ok(P.specId === "shredlog-spec-v2" && P.version === 6, "programme marqué spec v2, version 6");
+ok(P.days.find((d) => d.id === "cou_sam").exercises.map((e) => `${e.block}:${e[e.primary].ex}`).join() === "A:neck_curl_plate,B:neck_ext_plate,C:neck_side_plate,D:cable_shrug,E:farmers_walk", "bloc du samedi : 3 mouvements de cou, shrugs prise large, farmer's walk");
+ok(["neck_curl_plate", "neck_ext_plate", "neck_side_plate"].every((k) => D.EX[k].videoId === "gimeRpdqWQw" && D.EX[k].videoStart === 109 && D.EX[k].en), "vidéo de démo sur les 3 mouvements de cou (identifiant, départ, nom anglais)");
 const exNames = ["neck_curl_plate", "neck_ext_plate", "neck_side_plate", "d_shrug", "cable_shrug", "barbell_shrug", "farmers_walk"];
 ok(exNames.every((k) => D.EX[k]), "bibliothèque : 3 mouvements de cou, shrugs, farmer's walk");
 

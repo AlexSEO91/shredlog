@@ -210,6 +210,25 @@
     const f0 = `img/${base}_0.jpg`, f1 = img2 ? `img/${img2}_0.jpg` : `img/${base}_1.jpg`;
     return `<div class="demo"><img class="f0" src="${f0}" alt="${esc(info.name)} — position de départ"><img class="f1" src="${f1}" alt="${esc(info.name)} — position d'arrivée"><span class="badge acc tag">${esc(label)}</span><span class="step">départ ⇄ arrivée</span></div>`;
   }
+  // Vidéo de démo (optionnelle, sous l'image animée) : EX[…].videoId (YouTube) + videoStart (s). Le lecteur n'est chargé
+  // qu'au toucher. Repli si la vidéo est hors d'atteinte (hors ligne, supprimée, intégration refusée) : recherche YouTube.
+  const ytSearch = (info) => "https://www.youtube.com/results?search_query=" + encodeURIComponent(info.en || String(info.img || info.name).replace(/[_-]+/g, " "));
+  function videoBlock(info) {
+    if (!info || !info.videoId) return "";
+    const id = info.videoId; const start = Number(info.videoStart) || 0; const key = id + "@" + info.name;
+    if (UI.videoDead === id) return `<div class="video"><a class="btn ghost wide sm" target="_blank" rel="noopener" href="${esc(ytSearch(info))}">Vidéo indisponible · chercher sur YouTube</a></div>`;
+    if (UI.videoOn === key) return `<div class="video"><div class="yt"><iframe data-yt="${esc(id)}" src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?start=${start}&autoplay=1&playsinline=1&rel=0&enablejsapi=1" title="Vidéo de démo — ${esc(info.name)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div></div>`;
+    return `<div class="video"><button class="yt" data-act="video-play" data-key="${esc(key)}" aria-label="Lire la vidéo de démo"><img class="yt-thumb" data-yt="${esc(id)}" src="https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg" alt=""><span class="play">▶ Vidéo de démo${start ? ` · à ${Math.floor(start / 60)}:${pad(start % 60)}` : ""}</span></button></div>`;
+  }
+  function ytDead(id) { if (!id || UI.videoDead === id) return; UI.videoDead = id; UI.videoOn = null; render(); }
+  // Miniature absente (hors ligne) ou image grise 120 px de YouTube (vidéo supprimée) → repli.
+  document.addEventListener("error", (e) => { const t = e.target; if (t && t.classList && t.classList.contains("yt-thumb")) ytDead(t.dataset.yt); }, true);
+  document.addEventListener("load", (e) => { const t = e.target; if (!t || !t.dataset || !t.dataset.yt) return;
+    if (t.tagName === "IMG") { if (t.naturalWidth <= 120) ytDead(t.dataset.yt); }
+    else if (t.tagName === "IFRAME") { try { ["listening", "command"].forEach((ev) => t.contentWindow.postMessage(JSON.stringify(ev === "listening" ? { event: ev, id: 1, channel: "widget" } : { event: ev, func: "addEventListener", args: ["onError"], id: 1, channel: "widget" }), "*")); } catch (err) { /* lecteur sans API */ } } }, true);
+  // Erreur signalée par le lecteur (vidéo supprimée, privée ou non intégrable).
+  window.addEventListener("message", (e) => { if (!/^https:\/\/www\.youtube(-nocookie)?\.com$/.test(e.origin)) return; let d; try { d = typeof e.data === "string" ? JSON.parse(e.data) : e.data; } catch (err) { return; } if (d && d.event === "onError") { const f = $("iframe[data-yt]"); if (f) ytDead(f.dataset.yt); } });
+  window.addEventListener("online", () => { if (UI.videoDead) { UI.videoDead = null; render(); } });
   function musclesBlock(info) {
     if (!info) return "";
     const lab = (arr) => arr.map((m) => D.MUSCLE_LABELS[m] || m).join(", ");
@@ -225,7 +244,7 @@
       if (cur) { UI.previewDay = id === cur.dayId ? null : id; UI.sessionOverview = true; } else UI.sessionDay = id; // séance en cours : simple consultation
     }
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    const nv = VIEWS[v] ? v : "home"; if (nv !== UI.view) { UI.sheetHtml = null; UI._confirm = null; UI.viewEx = null; } UI.view = nv;
+    const nv = VIEWS[v] ? v : "home"; if (nv !== UI.view) { UI.sheetHtml = null; UI._confirm = null; UI.viewEx = null; UI.videoOn = null; UI.videoDead = null; } UI.view = nv;
     $$(".view").forEach((el) => el.classList.toggle("on", el.id === "v-" + UI.view));
     $$(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.v === UI.view || (UI.view !== "home" && !["session", "track", "nutrition"].includes(UI.view) && a.dataset.v === "more")));
     $("#hdr-title").textContent = VIEWS[UI.view];
@@ -360,7 +379,7 @@
     return `<div class="row between" style="margin-bottom:8px"><button class="small" style="color:var(--accent);font-weight:600;padding:6px 0" data-act="view-ex-back">‹ ${esc(day.name)}</button><span class="badge">lecture seule</span></div>
     <div class="card" style="padding:12px">
       ${e.machine && e.dumbbell ? `<div class="tabs" style="margin-bottom:10px"><button class="${vk === "machine" ? "on" : ""}" data-act="view-variant" data-v="machine">${esc(tabLabel(e, "machine"))}</button><button class="${vk === "dumbbell" ? "on" : ""}" data-act="view-variant" data-v="dumbbell">${esc(tabLabel(e, "dumbbell"))}</button></div>` : ""}
-      ${demoBlock(info, tabLabel(e, vk))}
+      ${demoBlock(info, tabLabel(e, vk))}${videoBlock(info)}
       <div class="row between" style="margin-top:12px"><h2 style="font-size:22px">${esc(info.name)}</h2><span class="badge">${e.warmup ? "échauffement" : "bloc " + esc(e.block)}</span></div>
       <div class="list" style="margin-top:8px">
         ${e.warmup ? `<div class="item"><div class="grow"><div class="s">Durée</div><div class="t">${esc(e.reps)}</div></div></div>` : `
@@ -415,7 +434,7 @@
     <div class="progress" style="margin-bottom:12px"><i style="width:${pct}%"></i></div>
     <div class="card" style="padding:12px">
       ${hasM && hasD ? `<div class="tabs" style="margin-bottom:10px"><button class="${se.variant === "machine" ? "on" : ""}" data-act="variant" data-v="machine">${esc(tabLabel(pe, "machine"))}</button><button class="${se.variant === "dumbbell" ? "on" : ""}" data-act="variant" data-v="dumbbell">${esc(tabLabel(pe, "dumbbell"))}</button></div>` : ""}
-      ${demoBlock(info, tabLabel(pe, se.variant))}
+      ${demoBlock(info, tabLabel(pe, se.variant))}${videoBlock(info)}
       <div class="row between" style="margin-top:12px"><h2 style="font-size:22px">${esc(info.name)}</h2>${se.warmup ? '<span class="badge">échauffement</span>' : `<span class="badge">bloc ${esc(se.block)}</span>`}</div>
       <p class="muted small" style="margin-top:4px">${se.warmup ? esc(se.reps) : `<b>${se.targetSets} séries × ${esc(se.reps)}</b>${se.rest ? ` · repos ${se.rest} s` : ""}${pe.tempo ? ` · tempo ${esc(pe.tempo)}` : ""}${v && v.kg != null ? ` · ${fmtK(v.kg)} kg / ${fmtK(v.lbs)} lbs` : ""}${v && v.note ? ` · <span class="faint">${esc(v.note)}</span>` : ""}`}${pe.info ? `<br><span class="faint">${esc(pe.info)}</span>` : ""}</p>
       <div style="margin-top:10px">${musclesBlock(info)}</div>
@@ -881,7 +900,7 @@
       unsupported: "Ce navigateur ne gère pas les notifications push.",
       "no-key": "Clé VAPID publique absente de config.js.",
       denied: "Notifications refusées. Pour les rétablir : Réglages de l'iPhone → Notifications → Shredlog → Autoriser.",
-      off: "Rappels : stock à commander (08h00), cycles, séance non enregistrée (20h30), bloc cou du mercredi (07h30), mensurations et recomptage du dimanche (21h00).",
+      off: "Rappels : stock à commander (08h00), cycles, séance non enregistrée (20h30), bloc cou du mercredi (07h30), mensurations et photos du dimanche (10h00), recomptage du 1er dimanche du mois (21h00).",
       on: "Activées sur cet appareil.",
     }[st] || "";
     const btns = st === "off" ? `<button class="btn primary wide" style="margin-top:10px" data-act="push-enable" ${UI.pushBusy ? "disabled" : ""}>${UI.pushBusy ? "Activation…" : "Activer les notifications"}</button>`
@@ -899,7 +918,7 @@
     ${pushCard()}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 18 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 19 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
@@ -933,6 +952,7 @@
     const act = b.dataset.act; const id = b.dataset.id;
     switch (act) {
       case "close-sheet": closeSheet(); break;
+      case "video-play": UI.videoOn = b.dataset.key; render(); break;
       case "confirm-ok": { const fn = UI._confirm; UI._confirm = null; closeSheet(); if (fn) fn(); break; }
       case "load-default": Data.ensureProgram(); render(); break;
       case "pick-day": UI.sessionDay = id; UI.viewEx = null; render(); break;
@@ -1084,7 +1104,7 @@
   Store.onChange(() => { if (UI.view !== "session" || !activeSession()) render(); else { $("#more-dot").classList.toggle("hidden", Data.unseenReviews() === 0); } Store.updateBanner(); });
   route();
   Store.updateBanner();
-  const GUIDE = { version: 4, purpose: "Schéma de la base Shredlog pour une IA", collections: { "program/current": "programme actif (specId shredlog-spec-v2) : days[] {id, weekday 0=dim, name, focus, duration, rest, slot, kind (\"neck\" pour le bloc cou + trapèzes : déclenche la notification du mercredi 07h30 s'il est prévu weekday 3), exercises[] {id, block, sets, reps, rest, tempo \"2-1-1\" (cou \"3-1-3\"), orig (nom dans le programme d'origine : les 45 exercices doivent rester présents), info, primary, machine{ex,kg,lbs,note,tab}, dumbbell{...}}}. ex = clé de la bibliothèque (voir data.js) ou custom{name,cues}", "programVersions/vN": "copie de chaque version + savedAt + reason", "sessions/<date>_<dayId>": "séance : status in_progress|done|abandoned, exercises[] {id, variant, targetSets, doneSets, sets[]{kg,lbs,reps,done}, difficulty facile|moyen|difficile, pain, note, skipped}", "measurements/<date>": "poids kg, tours en cm (waistRelaxed, neck, chest, armR...), bodyFat %", "photos/<date>": "face / profilG (profil gauche) / profilD (profil droit) / dos → {id,url,at}, + note. L'ancien champ profil = profilG", "supplementLogs/<date>": "taken{itemId:true}", "nutritionLogs/<date>": "meals{mealId:{eaten, foods[]}}", "nutrition/plan": "targets{kcal,protein,carbs,fat}, meals[]{id,name,time,foods[]{name,grams,kcal,protein,carbs,fat}}", "supplements/plan": "moments[], items[]{id,name,brand,dose,moment,why,cycle,fat, cycleStart,weeksOn,weeksOff,cycleEnabled}", "stock/<id>": "une ligne par boîte réelle : {name, brand, unit capsule|softgel|gramme|ml, unitsLeft (au comptage), lastCountedAt, countExclude[] (cases déjà cochées au comptage), countEffectiveFrom (1er jour décompté si des doses sont déjà sorties des boîtes — pilulier ; null sinon), unitsPerBox, dosePerDay, leadTimeDays, bufferDays, orderedAt (null = pas commandé), supplier, takes[]{item, qty} (cases supplementLogs qui la consomment), food (regex d'aliment Nutrition, whey)}. Le restant réel = unitsLeft − prises cochées depuis max(lastCountedAt, countEffectiveFrom) (jours OFF exclus), calcul dans stock.js. Oméga-3 = UNE seule ligne (omega1 + omega2).", "meta/migrations": "bascules faites une seule fois (programSpecV2, build18 : date) — ne pas supprimer", "reviews/<id>": "bilan IA : {date, title, summary, changes[]{what,from,to,why}, programVersionFrom, programVersionTo, appliesFrom, seen:false} → l'app affiche une pastille tant que seen=false" }, howToAdjust: "1) lire sessions + measurements ; 2) écrire programVersions/v(N+1) = copie modifiée ; 3) écrire program/current avec version N+1 ; 4) écrire reviews/<date> avec seen:false et la liste des changements. Ne jamais augmenter une charge si pain=true sur l'exercice." };
+  const GUIDE = { version: 4, purpose: "Schéma de la base Shredlog pour une IA", collections: { "program/current": "programme actif (specId shredlog-spec-v2) : days[] {id, weekday 0=dim, name, focus, duration, rest, slot, kind (\"neck\" pour le bloc cou + trapèzes : déclenche la notification du mercredi 07h30 s'il est prévu weekday 3), exercises[] {id, block, sets, reps, rest, tempo \"2-1-1\" (cou \"3-1-3\"), orig (nom dans le programme d'origine : les 45 exercices doivent rester présents), info, primary, machine{ex,kg,lbs,note,tab}, dumbbell{...}}}. ex = clé de la bibliothèque (voir data.js) ou custom{name,cues}", "programVersions/vN": "copie de chaque version + savedAt + reason", "sessions/<date>_<dayId>": "séance : status in_progress|done|abandoned, exercises[] {id, variant, targetSets, doneSets, sets[]{kg,lbs,reps,done}, difficulty facile|moyen|difficile, pain, note, skipped}", "measurements/<date>": "poids kg, tours en cm (waistRelaxed, neck, chest, armR...), bodyFat %", "photos/<date>": "face / profilG (profil gauche) / profilD (profil droit) / dos → {id,url,at}, + note. L'ancien champ profil = profilG", "supplementLogs/<date>": "taken{itemId:true}", "nutritionLogs/<date>": "meals{mealId:{eaten, foods[]}}", "nutrition/plan": "targets{kcal,protein,carbs,fat}, meals[]{id,name,time,foods[]{name,grams,kcal,protein,carbs,fat}}", "supplements/plan": "moments[], items[]{id,name,brand,dose,moment,why,cycle,fat, cycleStart,weeksOn,weeksOff,cycleEnabled}", "stock/<id>": "une ligne par boîte réelle : {name, brand, unit capsule|softgel|gramme|ml, unitsLeft (au comptage), lastCountedAt, countExclude[] (cases déjà cochées au comptage), countEffectiveFrom (1er jour décompté si des doses sont déjà sorties des boîtes — pilulier ; null sinon), unitsPerBox, dosePerDay, leadTimeDays, bufferDays, orderedAt (null = pas commandé), supplier, takes[]{item, qty} (cases supplementLogs qui la consomment), food (regex d'aliment Nutrition, whey)}. Le restant réel = unitsLeft − prises cochées depuis max(lastCountedAt, countEffectiveFrom) (jours OFF exclus), calcul dans stock.js. Oméga-3 = UNE seule ligne (omega1 + omega2).", "meta/migrations": "bascules faites une seule fois (programSpecV2, build18, shrugsJ6 : date) — ne pas supprimer", "reviews/<id>": "bilan IA : {date, title, summary, changes[]{what,from,to,why}, programVersionFrom, programVersionTo, appliesFrom, seen:false} → l'app affiche une pastille tant que seen=false" }, howToAdjust: "1) lire sessions + measurements ; 2) écrire programVersions/v(N+1) = copie modifiée ; 3) écrire program/current avec version N+1 ; 4) écrire reviews/<date> avec seen:false et la liste des changements. Ne jamais augmenter une charge si pain=true sur l'exercice." };
   // Après connexion à la base : état initial du stock (CSV du 27/09) et guide du schéma.
   // Jamais avant la connexion, sinon un appareil neuf écraserait le stock réel avec l'état initial.
   async function afterConnect() {
@@ -1092,6 +1112,7 @@
     try { const snap = await Store.db.collection("stock").get(); const have = new Set(snap.docs.map((d) => d.id)); D.STOCK.forEach((l) => { if (!have.has(l.id) && !Store.get("stock/" + l.id)) Store.set("stock/" + l.id, l); }); } catch (e) { console.warn("stock : lecture impossible, pas d'initialisation", e); }
     await migrateProgram();
     await migrateBuild18();
+    await migrateShrugsJ6();
     const g = Store.get("meta/guide"); if (!g || g.version !== GUIDE.version) Store.set("meta/guide", GUIDE);
   }
   // Programme spec v2 (chantier 4) — une seule fois (marqueur meta/migrations), après lecture réussie de la base :
@@ -1139,6 +1160,42 @@
     if (plan && plan.items) { const n = clone(plan); n.items.forEach((i) => { if (DOSE[i.id]) i.dose = DOSE[i.id][1]; }); if (JSON.stringify(n) !== JSON.stringify(plan)) Store.set("supplements/plan", n); }
     Store.list("photos").forEach((x) => { if (x.data.profil) Store.set(x.path, Data.photoDoc(x.id)); });
     Store.set("meta/migrations", { ...(Store.get("meta/migrations") || {}), build18: isoDate() });
+  }
+  // Shrugs lourds dans J6 (11/10/2026) — une seule fois, sur le programme actif tel qu'il est en base (charges et
+  // réglages conservés) : « Cou long D — Shrugs haltères » quitte le bloc du samedi et devient j6_shrug, après le dos
+  // lourd. Nouvelle version + bilan avec retour arrière, comme tout ajustement du programme.
+  async function migrateShrugsJ6() {
+    try { await Promise.all(["program", "programVersions", "reviews", "meta"].map((c) => Store.db.collection(c).get())); } catch (e) { console.warn("shrugs J6 : lecture impossible, pas de bascule", e); return; }
+    const mig = Store.get("meta/migrations") || {}; if (mig.shrugsJ6) return;
+    const cur = Store.get("program/current"); const now = new Date().toISOString(); const today = isoDate();
+    const j6 = cur && cur.specId === D.PROGRAM.specId && (cur.days || []).find((d) => d.id === "j6"); const sam = j6 && cur.days.find((d) => d.id === "cou_sam");
+    if (j6 && sam && !j6.exercises.some((e) => e.id === "j6_shrug")) {
+      if (!Store.get("programVersions/v" + cur.version)) Store.set("programVersions/v" + cur.version, { ...clone(cur), savedAt: now, reason: "Archive avant le déplacement des shrugs lourds dans J6" });
+      const known = Store.list("programVersions").map((x) => Number(x.data.version) || Number(x.id.slice(1)) || 0);
+      const nv = Math.max(Number(cur.version) || 0, ...known) + 1; const p = { ...clone(cur), version: nv };
+      const def = (id) => D.PROGRAM.days.find((d) => d.id === id); const pj6 = p.days.find((d) => d.id === "j6"), psam = p.days.find((d) => d.id === "cou_sam");
+      const old = psam.exercises.find((e) => e.id === "cou_sam_d"); const ne = clone(def("j6").exercises.find((e) => e.id === "j6_shrug"));
+      if (old && old.machine && old.machine.kg != null) ne.machine = clone(old.machine); // charge machine déjà calibrée
+      const after = pj6.exercises.findIndex((e) => e.id === "j6_4"); const before = pj6.exercises.findIndex((e) => e.id === "j6_6");
+      pj6.exercises.splice(after >= 0 ? after + 1 : before >= 0 ? before : pj6.exercises.length, 0, ne);
+      if (pj6.exercises.every((e) => e.warmup || /^\d+$/.test(e.block))) { let n = 0; pj6.exercises.forEach((e) => { if (!e.warmup) e.block = String(++n); }); }
+      psam.exercises = psam.exercises.filter((e) => e.id !== "cou_sam_d");
+      if (psam.exercises.every((e) => /^[A-Z]$/.test(e.block))) psam.exercises.forEach((e, i) => (e.block = String.fromCharCode(65 + i)));
+      psam.exercises.forEach((e) => { const o = def("cou_sam").exercises.find((x) => x.id === e.id); if (o) e.orig = o.orig; }); // positions de la spec
+      [[pj6, "j6"], [psam, "cou_sam"]].forEach(([d, id]) => { const o = D.PROGRAM.days.find((x) => x.id === id); d.focus = o.focus; d.duration = o.duration; });
+      const dim = p.days.find((d) => d.rest && d.weekday === 0); if (dim && /21h/.test(dim.focus || "")) dim.focus = def("dim").focus;
+      Store.set("program/current", p);
+      Store.set("programVersions/v" + nv, { ...clone(p), savedAt: now, reason: "Shrugs haltères lourds déplacés du bloc cou du samedi vers J6 — Pull 2" });
+      Store.set(`reviews/${today}_shrugs-j6`, {
+        date: today, title: "Shrugs lourds : du bloc cou vers J6 — Pull 2", appliesFrom: today, seen: false, programVersionFrom: cur.version, programVersionTo: nv,
+        summary: "Les trapèzes sont un muscle prioritaire : les shrugs haltères lourds deviennent un exercice suivi de J6, en milieu de séance, au lieu d'un accessoire de fin de bloc. Les 45 exercices d'origine ne changent pas (les shrugs étaient un ajout).",
+        changes: [
+          { what: "J6 — Pull 2", from: "10 exercices", to: "11 exercices : shrugs haltères 4 × 12-15, repos 60 s, 16 kg par main, après le dos lourd et avant l'arrière d'épaule et les biceps", why: "Shrugs lourds faits tant que la prise et les trapèzes sont frais, et suivis séance après séance" },
+          { what: "Cou + trapèzes — long (samedi)", from: "6 exercices, ~18 min", to: "5 exercices, ~13 min : flexion, extension, inclinaison latérale, shrugs prise large, farmer's walk", why: "Les shrugs lourds sont déjà faits dans J6" },
+        ],
+      });
+    }
+    Store.set("meta/migrations", { ...(Store.get("meta/migrations") || {}), shrugsJ6: today });
   }
   Store.connect().then(afterConnect);
   window.Shredlog = { Store, Data, UI, render };
