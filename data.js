@@ -320,7 +320,7 @@ window.SHRED_DATA = (function () {
       { id: "theanine", name: "L-Théanine", brand: "NOW 200 mg", dose: "1 cap avec le café", moment: "petitdej", why: "Lisse l'effet de la caféine : concentration calme, sans nervosité. Ratio 2:1 avec ~100 mg de caféine." },
       { id: "bcomplex", name: "B-Complex", brand: "Thorne Basic B", dose: "1 cap", moment: "petitdej", why: "Énergie cellulaire, système nerveux, méthylation. Contient déjà 400 µg de méthyl-B12." },
       { id: "d3k2", name: "Vitamine D3 + K2", brand: "Thorne Liquid", dose: "3 gouttes (0,15 ml)", moment: "petitdej", fat: true, why: "Testostérone, immunité, os. Liposoluble → avec du gras (œufs, avocat, noix). Cible sanguine 40-60 ng/mL." },
-      { id: "coq10", name: "CoQ10 Ubiquinol", brand: "Doctor's Best Kaneka", dose: "100 mg", moment: "petitdej", fat: true, why: "Énergie mitochondriale, cœur, antioxydant. Avec un repas gras." },
+      { id: "coq10", name: "CoQ10 Ubiquinol", brand: "Doctor's Best Kaneka", dose: "2 softgels (100 mg)", moment: "petitdej", fat: true, why: "Énergie mitochondriale, cœur, antioxydant. Avec un repas gras." },
       { id: "creatine", name: "Créatine", brand: "Thorne (NSF)", dose: "5 g", moment: "petitdej", why: "Force, volume musculaire, cognition. Tous les jours, même au repos. Boire 3-4 L d'eau." },
       { id: "omega1", name: "Oméga-3 #1", brand: "Nordic Naturals Ultimate Omega 2X", dose: "1 softgel", moment: "petitdej", fat: true, why: "EPA/DHA : anti-inflammatoire, récupération, cœur, cerveau. 2e prise au déjeuner." },
       { id: "collagen", name: "Collagène + Vitamine C", brand: "Sports Research + California Gold C", dose: "15 g + 1 cap", moment: "petitdej", why: "Tendons, articulations, peau. La vitamine C est nécessaire à la synthèse du collagène." },
@@ -331,15 +331,19 @@ window.SHRED_DATA = (function () {
       { id: "lecithin", name: "Lécithine tournesol", brand: "NOW 1200 mg", dose: "2 softgels", moment: "dejeuner", why: "Choline et phospholipides : foie, cerveau, volume séminal." },
       { id: "zinc", name: "Zinc Picolinate", brand: "Thorne 15 mg", dose: "1 cap", moment: "diner", why: "Testostérone, immunité, peau. Séparer du magnésium de 2 h (compétition d'absorption)." },
       { id: "ashwa", name: "Ashwagandha Sensoril", brand: "Life Extension 125 mg", dose: "1 cap", moment: "diner", why: "Baisse le cortisol, améliore sommeil et récupération. Surveiller le foie (bilan ALAT/ASAT)." },
-      { id: "magnesium", name: "Magnésium bisglycinate", brand: "Doctor's Best 300 mg", dose: "3 caps", moment: "coucher", why: "Relaxation, sommeil profond, récupération musculaire, 300+ réactions enzymatiques. 60 min avant le coucher." },
+      { id: "magnesium", name: "Magnésium bisglycinate", brand: "Doctor's Best 300 mg", dose: "3 comprimés (300 mg)", moment: "coucher", why: "Relaxation, sommeil profond, récupération musculaire, 300+ réactions enzymatiques. 60 min avant le coucher." },
     ],
   };
 
-  // Stock — état initial = COMPLEMENTS_INVENTAIRE.csv (comptage du 27/09/2026, avant les prises du jour).
+  // Stock — état initial = COMPLEMENTS_INVENTAIRE.csv : ce qui reste DANS LES BOÎTES.
+  // Capsules et softgels : la semaine du 12/10 au 18/10/2026 est déjà sortie des boîtes (pilulier), le décompte ne
+  // démarre que le 19/10 (countEffectiveFrom, voir stock.js) — aucune prise cochée avant ne consomme de stock.
+  // Poudres, whey et flacon de D3 ne vont pas dans un pilulier : décompte normal depuis le comptage.
   // Une ligne par boîte réelle ; takes = cases de la liste du jour qui la consomment (qty dans l'unité de la ligne).
   // Oméga-3 : UNE seule ligne consommée par omega1 + omega2. Whey : consommée par les repas validés (Nutrition).
   const STOCK_COUNTED = "2026-09-27";
-  const st = (id, name, brand, unit, unitsLeft, unitsPerBox, dosePerDay, takes, extra) => ({ id, name, brand, unit, unitsLeft, unitsPerBox, dosePerDay, leadTimeDays: 10, bufferDays: 7, lastCountedAt: STOCK_COUNTED, countExclude: [], orderedAt: null, supplier: "iHerb", takes, ...(extra || {}) });
+  const STOCK_EFFECTIVE = "2026-10-19";
+  const st = (id, name, brand, unit, unitsLeft, unitsPerBox, dosePerDay, takes, extra) => ({ id, name, brand, unit, unitsLeft, unitsPerBox, dosePerDay, leadTimeDays: 10, bufferDays: 7, lastCountedAt: STOCK_COUNTED, countEffectiveFrom: unit === "capsule" || unit === "softgel" ? STOCK_EFFECTIVE : null, countExclude: [], orderedAt: null, supplier: "iHerb", takes, ...(extra || {}) });
   const STOCK = [
     st("probio", "Probiotiques", "Garden of Life Men's 50B", "capsule", 0, 30, 1, [{ item: "probio", qty: 1 }], { orderedAt: STOCK_COUNTED }),
     st("creatine", "Créatine", "Thorne (NSF)", "gramme", 90, 150, 5, [{ item: "creatine", qty: 5 }]),
@@ -360,7 +364,7 @@ window.SHRED_DATA = (function () {
     st("citrulline", "L-Citrulline", "Doctor's Best Powder", "gramme", 180, 200, 3, [{ item: "citrulline", qty: 3 }]),
     st("selenium", "Sélénium", "NOW 100 µg", "capsule", 87, 100, 1, [{ item: "selenium", qty: 1 }]),
     st("d3k2", "Vitamine D3 + K2", "Thorne Liquid", "ml", 25, 30, 0.15, [{ item: "d3k2", qty: 0.15 }], { note: "3 gouttes/jour, conversion 20 gouttes/ml à confirmer sur le flacon." }),
-    st("coq10", "CoQ10 Ubiquinol", "Doctor's Best Kaneka 100 mg", "softgel", 71, 90, 1, [{ item: "coq10", qty: 1 }]),
+    st("coq10", "CoQ10 Ubiquinol", "Doctor's Best Kaneka 100 mg", "softgel", 71, 90, 2, [{ item: "coq10", qty: 2 }]),
   ];
 
   // Structure nutrition (le plan alimentaire sera construit ensuite — cible provisoire issue de la fiche projet)
@@ -393,5 +397,5 @@ window.SHRED_DATA = (function () {
 
   const MUSCLE_LABELS = { chest: "Pectoraux", shoulders: "Épaules", triceps: "Triceps", biceps: "Biceps", forearms: "Avant-bras", abdominals: "Abdominaux", quadriceps: "Quadriceps", calves: "Mollets", traps: "Trapèzes", lats: "Grand dorsal", "middle back": "Milieu du dos", "lower back": "Lombaires", glutes: "Fessiers", hamstrings: "Ischio-jambiers", neck: "Cou", adductors: "Adducteurs" };
 
-  return { EX, PROGRAM, SUPPLEMENTS, STOCK, NUTRITION, MEASURE_FIELDS, BASELINE, MUSCLE_LABELS, kg };
+  return { EX, PROGRAM, SUPPLEMENTS, STOCK, STOCK_EFFECTIVE, NUTRITION, MEASURE_FIELDS, BASELINE, MUSCLE_LABELS, kg };
 })();

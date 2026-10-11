@@ -4,7 +4,12 @@
    Une ligne de stock ≠ une case à cocher : chaque ligne liste les cases qui la consomment
    (takes[{item, qty}]) ou, pour la whey, les aliments des repas validés (food: /regex/).
    Le stock restant est DÉRIVÉ des cases cochées depuis le dernier comptage : décocher rend l'unité,
-   jamais de double décompte. Unité libre (capsule, softgel, gramme, ml) : tout est dans l'unité de la ligne. */
+   jamais de double décompte. Unité libre (capsule, softgel, gramme, ml) : tout est dans l'unité de la ligne.
+
+   Pilulier : unitsLeft est ce qui reste DANS LES BOÎTES. Si des doses en sont déjà sorties (semaine préparée
+   d'avance), countEffectiveFrom = 1er jour où une prise cochée entame de nouveau la boîte : avant cette date,
+   rien n'est décompté et la projection de rupture démarre ce jour-là. Une date postérieure à aujourd'hui est
+   normale (lastCountedAt dans le futur est traité de la même façon). */
 (function (root) {
   "use strict";
   const pad = (n) => String(n).padStart(2, "0");
@@ -56,22 +61,30 @@
   }
   const lineCycle = (line, ctx) => (line.takes && line.takes.length ? ctx.cycleOf(line.takes[0].item) : null);
 
+  /* 1er jour décompté : le comptage, ou countEffectiveFrom s'il est plus tard (doses déjà sorties des boîtes). */
+  function countFrom(line, today) {
+    const counted = line.lastCountedAt || today; const eff = line.countEffectiveFrom;
+    return eff && eff > counted ? eff : counted;
+  }
+
   /* État complet d'une ligne à la date `today`. */
   function status(line, today, ctx) {
-    const counted = line.lastCountedAt || today;
+    const counted = line.lastCountedAt || today; const from = countFrom(line, today);
+    const pending = from > today; // décompte pas encore commencé : les prises cochées ne consomment rien
     let used = 0;
-    for (let d = counted; d <= today; d = addDays(d, 1)) used += dayUse(line, d, ctx, d === counted ? line.countExclude : null);
+    for (let d = from; d <= today; d = addDays(d, 1)) used += dayUse(line, d, ctx, d === counted ? line.countExclude : null);
     const raw = Number(line.unitsLeft) - used; const unitsLeft = Math.max(0, raw);
     // Projection depuis le début de la journée : on remet les prises cochées aujourd'hui
     // (si le recomptage date d'aujourd'hui, X + prises exclues = stock du matin).
-    const startOfDay = Math.max(0, raw + dayUse(line, today, ctx, null));
+    // Décompte à venir : rien n'a été retiré, la projection part du 1er jour décompté.
+    const startOfDay = pending ? Math.max(0, raw) : Math.max(0, raw + dayUse(line, today, ctx, null));
     const dose = Number(line.dosePerDay) || 0;
     const cyc = lineCycle(line, ctx);
     let rupture;
     if (dose <= 0) rupture = null;
     else {
       let n = Math.floor(startOfDay / dose + EPS); // nombre de jours ON couverts
-      let d = today; let guard = 0;
+      let d = pending ? from : today; let guard = 0;
       while (guard++ < 3660) { if (isOn(cyc, d)) { if (n <= 0) break; n--; } d = addDays(d, 1); }
       rupture = d;
     }
@@ -79,14 +92,16 @@
     const alertDate = rupture ? addDays(rupture, -((line.leadTimeDays || 0) + (line.bufferDays == null ? 7 : line.bufferDays))) : null;
     const inAlert = !!alertDate && today >= alertDate; // jamais d'égalité stricte : les items en retard restent en alerte
     const level = inAlert ? "red" : alertDate && today >= addDays(alertDate, -7) ? "amber" : "green";
-    return { id: line.id, unitsLeft: Math.round(unitsLeft * 1000) / 1000, daysLeft, rupture, alertDate, inAlert, level, ordered: !!line.orderedAt, off: !isOn(cyc, today) };
+    return { id: line.id, unitsLeft: Math.round(unitsLeft * 1000) / 1000, daysLeft, rupture, alertDate, inAlert, level, ordered: !!line.orderedAt, off: !isOn(cyc, today), effectiveFrom: pending ? from : null };
   }
 
   /* Recomptage : X est le stock réel maintenant, prises déjà cochées aujourd'hui incluses.
      received = true pour « Reçu — j'ai X unités » (la commande est arrivée → statut « commandé » levé) ;
-     false pour le recomptage mensuel (une commande en cours reste en cours). */
+     false pour le recomptage mensuel (une commande en cours reste en cours).
+     Pilulier encore en cours (countEffectiveFrom à venir) : on compte les boîtes, le décompte reste suspendu jusque-là. */
   function recount(line, units, today, ctx, received) {
-    return { ...line, unitsLeft: Number(units), lastCountedAt: today, countExclude: keysTaken(line, today, ctx), orderedAt: received ? null : line.orderedAt || null };
+    const eff = line.countEffectiveFrom && line.countEffectiveFrom > today ? line.countEffectiveFrom : null;
+    return { ...line, unitsLeft: Number(units), lastCountedAt: today, countEffectiveFrom: eff, countExclude: keysTaken(line, today, ctx), orderedAt: received ? null : line.orderedAt || null };
   }
   /* Lignes qu'on peut compter à la main : capsules et softgels (pas les poudres ni le flacon de D3). */
   const COUNTABLE = ["capsule", "softgel"];
@@ -117,7 +132,7 @@
     return null;
   }
 
-  const api = { isOn, cycleInfo, dayUse, status, recount, countable, orderGroup, nextRecount, addDays, diffDays };
+  const api = { isOn, cycleInfo, dayUse, countFrom, status, recount, countable, orderGroup, nextRecount, addDays, diffDays };
   root.ShredStock = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

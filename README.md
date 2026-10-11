@@ -24,7 +24,7 @@ App perso de suivi du Programme Shred (remplace Fitlog). Deux modes avec le mêm
 | `programVersions/vN` | copie de chaque version (+ `savedAt`, `reason`) |
 | `sessions/<date>_<dayId>` | séance : `status`, `exercises[]` avec `variant`, `sets[]{kg,lbs,reps,done}`, `doneSets`, `difficulty`, `pain`, `note`, `skipped` |
 | `measurements/<date>` | poids + tours (cm) + note |
-| `photos/<date>` | `face`/`profil`/`dos` → `{id,url}` (assets) |
+| `photos/<date>` | `face`/`profilG`/`profilD`/`dos` → `{id,url}` (assets) ; l'ancien `profil` = `profilG` |
 | `supplementLogs/<date>` | `taken{itemId:true}` (+ `posture0..4` pour la routine) |
 | `nutritionLogs/<date>` | `meals{mealId:{eaten, foods[]}}` |
 | `nutrition/plan`, `supplements/plan` | plans (importables en JSON) |

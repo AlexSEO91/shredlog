@@ -121,7 +121,7 @@
       if (wd !== 0) skipped.push("hebdo : on n'est pas dimanche à Bangkok");
       else {
         if (c.get("measurements/" + today)) skipped.push("mensurations : déjà saisies");
-        else once("weekly:" + today, () => ({ title: "Mensurations de la semaine", body: "Poids à jeun, tour de taille, bras, cuisses + photos face / profil / dos.", url: "#track", tag: "measures" }));
+        else once("weekly:" + today, () => ({ title: "Mensurations de la semaine", body: "Poids à jeun, tour de taille, bras, cuisses + photos face / profils / dos.", url: "#track", tag: "measures" }));
         // Recomptage mensuel : 1er dimanche du mois, sauf si tout a été recompté dans les 7 derniers jours.
         if (Number(today.slice(8)) > 7) skipped.push("recomptage : pas le 1er dimanche du mois");
         else {

@@ -4,6 +4,8 @@ const ROOT = path.join(__dirname, "..");
 global.window = {}; eval(fs.readFileSync(path.join(ROOT, "data.js"), "utf8"));
 const D = window.SHRED_DATA; const S = require(path.join(ROOT, "stock.js"));
 const N = require(path.join(ROOT, "supabase/functions/shredlog-notify/notify.js"));
+// Scénarios datés du 27/09 : décompte depuis le comptage, sans la semaine de pilulier du 12/10 (contrôlée dans check_stock.js).
+D.STOCK.forEach((l) => (l.countEffectiveFrom = null));
 
 let fails = 0; const ok = (cond, msg, extra) => { if (!cond) { fails++; console.log("  ✗ " + msg + (extra ? "\n      → " + JSON.stringify(extra) : "")); } };
 const clone = (o) => JSON.parse(JSON.stringify(o));

@@ -187,7 +187,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
 .tbl td{padding:7px 6px;border-bottom:1px solid var(--line)}
 .tbl td.r,.tbl th.r{text-align:right}
 .scroll{overflow-x:auto}
-.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.photos{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+@media(min-width:560px){.photos{grid-template-columns:repeat(4,1fr)}.grid2 .photos{grid-template-columns:repeat(2,1fr)}}
 .photos .ph{aspect-ratio:3/4;border-radius:var(--rs);background:var(--bg3);overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-family:var(--disp);font-size:13px;text-align:center;padding:6px}
 .photos .ph img{width:100%;height:100%;object-fit:cover;display:block}
 .photos .ph .lab{position:absolute;left:6px;top:6px}
@@ -219,6 +220,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
 .sup{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
 .sup:first-child{border-top:0}
 .sup .t{font-weight:600}
+.sup .stkq{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:2px;padding-top:2px;font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;text-decoration:none}
+.sup .stkq .q-red{color:var(--red)}.sup .stkq .q-amber{color:var(--amber)}
 .sup .s{font-size:13px;color:var(--ink2)}
 .sup .why{font-size:13.5px;color:var(--ink2);margin-top:6px;display:none}
 .sup.open .why{display:block}
@@ -278,10 +281,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeri
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="config.js"></script>
-<script src="backend.js?v=17"></script>
-<script src="data.js?v=17"></script>
-<script src="stock.js?v=17"></script>
-<script src="app.js?v=17"></script>
+<script src="backend.js?v=18"></script>
+<script src="data.js?v=18"></script>
+<script src="stock.js?v=18"></script>
+<script src="app.js?v=18"></script>
 <script>if ("serviceWorker" in navigator && location.protocol === "https:") { /* GitHub Pages sert l'app sous /shredlog/ : le service worker (et donc le push) doit être enregistré sur ce chemin, sinon il échoue en silence. */ const base = location.pathname.startsWith("/shredlog/") ? "/shredlog/" : "/"; navigator.serviceWorker.register(base + "sw.js", { scope: base }).catch((e) => console.warn("service worker", e)); }</script>
 </body>
 </html>
