@@ -28,11 +28,11 @@ App perso de suivi du Programme Shred (remplace Fitlog). Deux modes avec le mêm
 | `supplementLogs/<date>` | `taken{itemId:true}` (+ `posture0..4` pour la routine) |
 | `nutritionLogs/<date>` | `meals{mealId:{eaten, foods[]}}` |
 | `nutrition/plan`, `supplements/plan` | plans (importables en JSON) |
-| `reviews/<id>` | bilan IA : `summary`, `changes[]{what,from,to,why}`, `programVersionFrom/To`, `seen` |
+| `reviews/<id>` | rapport (hebdomadaire : id = date du dimanche) : `title`, `summary`, `changes[]{what,from,to,why}`, `programVersionFrom/To`, `seen` |
 | `meta/guide` | ce schéma, écrit par l'app au premier lancement connecté |
 
 ## Boucle d'ajustement par l'IA
 1. Lire `sessions`, `measurements` (read_db).
 2. Écrire `programVersions/v(N+1)` puis `program/current` (version N+1).
-3. Écrire `reviews/<date>` avec `seen:false` → pastille rouge dans l'app, page « Bilan & ajustements », retour arrière possible.
+3. Écrire `reviews/<date>` avec `seen:false` → pastille rouge dans l'app, écran « Rapports » (la pastille part à l'ouverture), retour arrière possible.
 Règle : jamais d'augmentation de charge sur un exercice marqué `pain:true`.
