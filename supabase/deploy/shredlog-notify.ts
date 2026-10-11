@@ -372,7 +372,7 @@ window.SHRED_DATA = (function () {
     st("omega3", "Oméga-3", "Nordic Naturals Ultimate Omega 2X", "softgel", 29, 60, 2, [{ item: "omega1", qty: 1 }, { item: "omega2", qty: 1 }]),
     st("collagen", "Collagène", "Sports Research", "gramme", 200, 300, 15, [{ item: "collagen", qty: 15 }]),
     st("rhodiola", "Rhodiola", "Thorne 100 mg", "capsule", 42, 60, 2, [{ item: "rhodiola", qty: 2 }]),
-    st("whey", "Whey ISO100", "Dymatize Hydrolyzed", "gramme", 2100, 2300, 60, [], { food: "whey", leadTimeDays: 1, supplier: "Central", note: "Achat Central Thailand, pas iHerb. Décomptée depuis les repas validés dans Nutrition." }),
+    st("whey", "Whey ISO100", "Dymatize Hydrolyzed", "gramme", 2100, 2300, 32, [], { food: "whey", leadTimeDays: 1, supplier: "Central", note: "Achat Central Thailand, pas iHerb. Décomptée depuis les repas validés dans Nutrition." }),
     st("tongkat", "Tongkat Ali", "Advance Physician Formulas 200 mg", "capsule", 39, 60, 1, [{ item: "tongkat", qty: 1 }]),
     st("theanine", "L-Théanine", "NOW 200 mg", "capsule", 39, 60, 1, [{ item: "theanine", qty: 1 }]),
     st("magnesium", "Magnésium bisglycinate", "Doctor's Best 300 mg", "capsule", 118, 120, 3, [{ item: "magnesium", qty: 3 }]),
@@ -389,16 +389,106 @@ window.SHRED_DATA = (function () {
     st("coq10", "CoQ10 Ubiquinol", "Doctor's Best Kaneka 100 mg", "softgel", 71, 90, 2, [{ item: "coq10", qty: 2 }]),
   ];
 
-  // Structure nutrition (le plan alimentaire sera construit ensuite — cible provisoire issue de la fiche projet)
+  // Programme alimentaire — programme-alimentaire.md (11/10/2026). Plan initial : la base (nutrition/plan) fait foi
+  // ensuite ; c'est Claude qui écrit les versions suivantes (phase, cibles, plats). L'app lit la phase, ne la décide pas.
+  // Macros par plat : ESTIMÉES à partir des ingrédients (table FOODS, valeurs pour 100 g ou par unité, kcal = 4P + 4G + 9L).
+  // Viande pesée crue (le « poulet batch » compte comme sa portion crue), riz et pommes de terre cuits, pâtes en sec.
+  // Huile : règle du plan (1 càs = 12 g par repas, 1 càc les jours de bœuf), d'olive de préférence. Elle est comptée dans les
+  // plats poêlés même quand la description ne la répète pas ; pas dans le teriyaki (vapeur), le bol gingembre (poché), le pané (four).
+  const FOODS = {
+    poulet: ["Blanc de poulet", 23, 0, 1.7], boeuf: ["Bœuf haché 5 %", 21, 0, 5], oeuf: ["Œuf", 6.3, 0.4, 5.3, "pièce"],
+    riz: ["Riz jasmin cuit", 2.7, 28, 0.3], pates: ["Pâtes (poids sec)", 12.5, 74, 1.5], pdt: ["Pommes de terre", 2, 18, 0.1], lait: ["Lait", 3.2, 4.8, 3.6, "ml"],
+    brocoli: ["Brocoli", 2.8, 4, 0.4], carotte: ["Carotte", 0.9, 7, 0.2], haricots: ["Haricots verts", 1.8, 4.5, 0.2], concombre: ["Concombre", 0.7, 2.5, 0.1],
+    tomate: ["Tomates", 0.9, 3, 0.2], concassees: ["Tomates concassées", 1.2, 4, 0.2], mais: ["Maïs", 3.2, 17, 1.2], pois: ["Petits pois", 5.4, 10, 0.4],
+    pleurotes: ["Pleurotes", 3.3, 4, 0.4], oignon: ["Oignon", 1.1, 8, 0.1], courgette: ["Courgette", 1.2, 2.5, 0.3], poivron: ["Poivron rouge", 1, 5, 0.3],
+    chou: ["Chou chinois", 1.5, 1.5, 0.2], laitue: ["Laitue", 1.4, 1.5, 0.2], yaourt: ["Yaourt nature", 3.8, 4.8, 3.2], chapelure: ["Chapelure", 12, 70, 5],
+    huile_cas: ["Huile d'olive", 0, 0, 12, "càs"], huile_cac: ["Huile d'olive", 0, 0, 4.5, "càc"], soja: ["Sauce soja", 1.3, 0.8, 0, "càs"], miel: ["Miel", 0, 5.7, 0, "càc"],
+    moutarde_cas: ["Moutarde", 1.1, 0.6, 1.2, "càs"], moutarde_cac: ["Moutarde", 0.4, 0.2, 0.4, "càc"], huitre: ["Sauce huître", 0.2, 2, 0, "càs"],
+  };
+  const macrosOf = (list) => { const m = list.reduce((a, [k, q]) => { const f = FOODS[k]; const x = f[4] && f[4] !== "ml" ? q : q / 100; /* à l'unité (pièce, càs, càc) ou pour 100 g / 100 ml */ return { protein: a.protein + f[1] * x, carbs: a.carbs + f[2] * x, fat: a.fat + f[3] * x }; }, { protein: 0, carbs: 0, fat: 0 });
+    return { kcal: Math.round(4 * m.protein + 4 * m.carbs + 9 * m.fat), protein: Math.round(m.protein), carbs: Math.round(m.carbs), fat: Math.round(m.fat) }; };
+  // dish(nom, créneau, [bloc protéines, bloc féculents], [[aliment, quantité, libellé ?]…], assaisonnement non compté)
+  const dish = (name, slot, blocks, list, sauce) => ({ name, slot, blocks: { protein: blocks[0], starch: blocks[1] },
+    ingredients: list.map(([k, q, label]) => ({ name: label || FOODS[k][0], qty: q, unit: FOODS[k][4] || "g" })), sauce: sauce || "", macros: macrosOf(list), macrosEstimated: true });
+  const DISHES = {
+    teriyaki: dish("Bol poulet teriyaki maison", "midi", ["poulet_oeufs", "riz"], [["poulet", 180, "Poulet batch"], ["riz", 200], ["brocoli", 150, "Brocoli vapeur"], ["carotte", 50, "Carotte vapeur"], ["oeuf", 2, "Œufs durs"], ["soja", 1], ["miel", 1]], "ail, gingembre"),
+    poulet_roti: dish("Poulet rôti aux herbes de Provence", "soir", ["poulet", "pdt"], [["poulet", 240], ["pdt", 320, "Pommes de terre rôties au four (crues)"], ["haricots", 200], ["huile_cas", 1]], "herbes de Provence"),
+    salade: dish("Salade composée", "midi", ["poulet_oeufs", "pdt"], [["poulet", 180, "Poulet batch"], ["oeuf", 2, "Œufs durs"], ["pdt", 300, "Pommes de terre cuites"], ["concombre", 100], ["tomate", 100], ["mais", 50], ["huile_cas", 1], ["moutarde_cac", 1]], "vinaigre"),
+    bolognaise: dish("Spaghetti bolognaise", "soir", ["boeuf", "pates"], [["boeuf", 220], ["pates", 75, "Spaghetti (sec)"], ["concassees", 200], ["carotte", 80], ["oignon", 60], ["courgette", 100, "Courgette râpée"], ["huile_cac", 1]], "ail, thym"),
+    cantonais: dish("Riz cantonais au poulet", "midi", ["poulet_oeufs", "riz"], [["poulet", 180, "Poulet batch"], ["oeuf", 2], ["riz", 200, "Riz de la veille"], ["pois", 60], ["carotte", 60, "Carotte en dés"], ["huile_cas", 1], ["soja", 1]], "2 tiges d'oignon nouveau"),
+    moutarde: dish("Poulet moutarde-champignons", "soir", ["poulet", "riz"], [["poulet", 240, "Blanc de poulet émincé"], ["pleurotes", 200], ["oignon", 60], ["yaourt", 50], ["moutarde_cas", 1], ["riz", 200], ["courgette", 150, "Courgette poêlée"], ["huile_cas", 1, "Huile d'olive (cuisson)"]], ""),
+    omelette: dish("Omelette poulet-champignons", "midi", ["omelette", "pdt"], [["oeuf", 3], ["poulet", 130, "Poulet batch"], ["pleurotes", 80], ["pdt", 300, "Pommes de terre batch poêlées"], ["tomate", 100], ["concombre", 100], ["huile_cas", 1, "Huile d'olive (cuisson)"]], ""),
+    basquaise: dish("Poulet basquaise", "soir", ["poulet", "riz"], [["poulet", 240], ["poivron", 150], ["tomate", 200], ["oignon", 60], ["huile_cas", 1], ["riz", 200]], "ail, paprika doux"),
+    gingembre: dish("Bol poulet-gingembre", "midi", ["poulet_oeufs", "riz"], [["poulet", 180, "Poulet poché batch"], ["riz", 200], ["concombre", 100], ["carotte", 80, "Carotte râpée"], ["oeuf", 2, "Œufs durs"], ["soja", 1]], "gingembre, ail"),
+    parmentier: dish("Parmentier de poulet", "soir", ["poulet", "puree"], [["poulet", 240, "Blanc de poulet haché"], ["carotte", 120], ["oignon", 60], ["pdt", 300, "Pommes de terre (purée)"], ["lait", 50], ["laitue", 80, "Laitue en vinaigrette"], ["huile_cas", 1, "Huile d'olive (cuisson)"]], ""),
+    pates_brocoli: dish("Pâtes poulet-brocoli à l'ail", "midi", ["poulet_oeufs", "pates"], [["pates", 75, "Pâtes (sec)"], ["poulet", 180, "Poulet batch"], ["brocoli", 200], ["oeuf", 1], ["huile_cas", 1]], "ail"),
+    wok: dish("Poulet sauté aux légumes (wok, sauce douce)", "soir", ["poulet_oeufs", "riz"], [["poulet", 180], ["oeuf", 2], ["chou", 150], ["carotte", 80], ["brocoli", 100], ["huitre", 1], ["soja", 1], ["riz", 200], ["huile_cas", 1, "Huile d'olive (cuisson)"]], ""),
+    pane: dish("Poulet pané au four, purée, haricots verts", "midi", ["poulet", "puree"], [["poulet", 240], ["chapelure", 20], ["pdt", 250, "Pommes de terre (purée)"], ["haricots", 150]], "panure à l'œuf, partagée"),
+    veloute: dish("Velouté de légumes + omelette au poulet", "soir", ["omelette", "pdt"], [["carotte", 150], ["courgette", 150], ["pdt", 200], ["oignon", 60], ["oeuf", 3], ["poulet", 150], ["huile_cas", 1, "Huile d'olive (cuisson)"]], "bouillon du poulet poché"),
+  };
+  const shop = (id, name, qty, priceTHB, aisle, group) => ({ id, name, qty, ...(priceTHB != null ? { priceTHB } : {}), aisle, ...(group ? { group } : {}) });
+  const veg = (id, name, qty) => shop(id, name, qty, null, "Légumes", "legumes");
   const NUTRITION = {
-    version: 0,
-    targets: { kcal: 2000, protein: 165, carbs: 180, fat: 65 },
-    note: "Plan provisoire : cibles phase shred (déficit léger, protéines 1,8-2,2 g/kg). Les repas détaillés seront importés une fois le plan construit.",
-    meals: [
-      { id: "m1", name: "Snack protéiné midi", time: "12:00", foods: [{ name: "Whey ISO100", grams: 30, kcal: 110, protein: 25, carbs: 1, fat: 0.5 }, { name: "Amandes", grams: 20, kcal: 116, protein: 4, carbs: 4, fat: 10 }] },
-      { id: "m2", name: "Post-séance", time: "18:00", foods: [{ name: "Whey ISO100", grams: 30, kcal: 110, protein: 25, carbs: 1, fat: 0.5 }] },
-      { id: "m3", name: "Dîner", time: "19:30", foods: [] },
+    version: 1,
+    reason: "Plan initial — programme-alimentaire.md (11/10/2026)",
+    phase: "deficit",
+    targets: { kcal: 1900, protein: 160, carbs: 170, fat: 65 },
+    phases: {
+      deficit: { label: "Déficit", targets: { kcal: 1900, protein: 160, carbs: 170, fat: 65 }, until: "~12 % de masse grasse" },
+      surplus: { label: "Surplus", targets: { kcal: 2550 }, note: "Ensuite. Macros à fixer par Claude à la bascule, depuis le rapport hebdo." },
+    },
+    plate: {
+      rule: "1 bloc protéines + 1 bloc féculents + 200 g de légumes minimum + l'huile d'olive (1 càs max, 1 càc les jours de bœuf)",
+      perMeal: { kcal: 750, protein: 60, carbs: 65, fat: 25 },
+      protein: [
+        { id: "poulet_oeufs", name: "Poulet + œufs", portion: "180 g blanc cru + 2 œufs", protein: 54, fat: 13 },
+        { id: "poulet", name: "Poulet seul", portion: "240 g blanc cru", protein: 55, fat: 4 },
+        { id: "boeuf", name: "Bœuf", portion: "220 g bœuf haché 5 % MG cru", protein: 46, fat: 11 },
+        { id: "omelette", name: "Omelette", portion: "3 œufs + 130 g blanc cru", protein: 50, fat: 17 },
+      ],
+      starch: [
+        { id: "riz", name: "Riz jasmin", portion: "200 g cuit (1 bol à ras)", carbs: 56 },
+        { id: "pates", name: "Pâtes", portion: "75 g sec", carbs: 56 },
+        { id: "pdt", name: "Pommes de terre", portion: "320 g crues ou 300 g cuites (2 moyennes)", carbs: 56 },
+        { id: "puree", name: "Purée", portion: "300 g de pommes de terre + 50 ml de lait", carbs: 56 },
+      ],
+    },
+    // Matin + shake. La whey du shake est décomptée du stock (ligne « whey », food: /whey/) quand la case est cochée.
+    fixed: [
+      { id: "matin", name: "Matin", content: "1 yaourt nature non sucré (135 g) + 1 banane nam wa", note: "Après ta boisson à jeun. Rotation du fruit : banane ↔ 150 g de papaye ↔ 200 g de pastèque.", macros: { kcal: 185, protein: 6, carbs: 31, fat: 4 }, foods: [{ name: "Yaourt nature", grams: 135 }, { name: "Banane nam wa", grams: 100 }] },
+      { id: "shake", name: "Shake", content: "1 dose de whey (32 g) + 25 g d'amandes", note: "Avec le repas de midi. Amandes à 25 g (15 g dans le fichier d'origine) pour tenir ~1 880 kcal et ~60 g de lipides par jour.", macros: { kcal: 258, protein: 30, carbs: 5, fat: 13 }, foods: [{ name: "Whey ISO100", grams: 32 }, { name: "Amandes", grams: 25 }] },
     ],
+    dishes: DISHES,
+    week: [
+      { weekday: 1, midi: "teriyaki", soir: "poulet_roti" }, { weekday: 2, midi: "salade", soir: "bolognaise" }, { weekday: 3, midi: "cantonais", soir: "moutarde" },
+      { weekday: 4, midi: "omelette", soir: "basquaise" }, { weekday: 5, midi: "gingembre", soir: "parmentier" }, { weekday: 6, midi: "pates_brocoli", soir: "wok" },
+      { weekday: 7, midi: "pane", soir: "veloute" },
+    ],
+    shopping: {
+      groups: { legumes: { name: "Légumes de la semaine", priceTHB: 260 } },
+      items: [
+        shop("poulet", "Blanc de poulet (sacs surgelés Makro)", "5 kg", 350, "Viandes"), shop("boeuf", "Bœuf haché 5 % thaï", "0,5 kg", 140, "Viandes"),
+        shop("yaourts", "Yaourts nature non sucrés", "14", 180, "Crèmerie"), shop("oeufs", "Œufs taille 1–2 (plateau de 30)", "37", 170, "Crèmerie"), shop("lait", "Lait UHT (enfants + purées)", "3,5 L", 155, "Crèmerie"),
+        veg("carottes", "Carottes", "1,5 kg"), veg("brocoli", "Brocoli", "1,2 kg"), veg("tomates", "Tomates", "1,2 kg"), veg("haricots", "Haricots verts", "1 kg"), veg("courgettes", "Courgettes", "1 kg"), veg("concombre", "Concombre", "1 kg"),
+        veg("oignons", "Oignons", "1 kg"), veg("pleurotes", "Pleurotes (het nang fah)", "0,6 kg"), veg("chou", "Chou chinois", "0,5 kg"), veg("poivrons", "Poivrons rouges", "0,4 kg"), veg("pois_mais", "Petits pois + maïs surgelés", "0,4 kg"), veg("laitue", "Laitue", "0,3 kg"),
+        shop("pdt", "Pommes de terre", "3 kg", 150, "Légumes"), shop("aromates", "Aromates frais (ail, gingembre, oignon nouveau, persil ou coriandre, citron vert)", "", 70, "Légumes"),
+        shop("fruits", "Fruits (bananes nam wa, papaye, pastèque)", "~3 kg", 100, "Fruits"),
+        shop("riz", "Riz jasmin", "1,5 kg", 65, "Épicerie"), shop("pates", "Pâtes (spaghetti, penne)", "0,5 kg", 35, "Épicerie"), shop("concassees", "Tomates concassées en boîte", "2 × 400 g", 70, "Épicerie"),
+        shop("condiments", "Condiments amortis (soja, sauce huître, moutarde, miel, vinaigre, herbes de Provence, thym, paprika doux, chapelure, huile)", "", 100, "Épicerie"),
+      ],
+      totalTHB: 1845,
+    },
+    batch: {
+      weekday: 0, minutes: 60,
+      steps: [
+        { id: "riz", title: "Riz", detail: "800 g de riz cru au rice cooker. Refroidir vite, boîtes au frigo (4 jours max), le reste congelé en portions de 200 g." },
+        { id: "pdt", title: "Pommes de terre", detail: "1,5 kg cuites à la vapeur avec la peau (salade du mardi, omelette du jeudi). Frigo, 4 jours." },
+        { id: "poulet", title: "Poulet poché", detail: "1,2 kg de blancs dans un bouillon ail–gingembre–laurier–poivre, 15 min à frémissement, repos 10 min. Garder le bouillon pour le velouté." },
+        { id: "oeufs", title: "Œufs durs", detail: "10 œufs, 9 min, eau froide, au frigo avec la coquille." },
+        { id: "legumes", title: "Légumes", detail: "Brocoli en fleurettes, haricots verts équeutés, carottes râpées, concombre lavé ; boîtes avec papier absorbant." },
+        { id: "bocaux", title: "Deux bocaux", detail: "Vinaigrette moutarde (huile, moutarde, vinaigre, sel, poivre) et sauce soja–gingembre–ail." },
+      ],
+    },
   };
 
   const MEASURE_FIELDS = [
@@ -469,10 +559,14 @@ window.SHRED_DATA = (function () {
     const sl = ctx.supLog(date); const taken = (sl && sl.taken) || {};
     (line.takes || []).forEach((t) => { if (taken[t.item] && !ex.includes(t.item) && isOn(ctx.cycleOf(t.item), date)) q += t.qty; });
     if (line.food) {
+      // Repas cochés du journal : les aliments sont ceux copiés dans le journal (l.foods), sinon ceux du plan
+      // (plan.fixed = matin / shake ; plan.meals = ancien format).
       const re = new RegExp(line.food, "i"); const nl = ctx.nutLog(date); const meals = (nl && nl.meals) || {};
-      ((ctx.nutPlan && ctx.nutPlan.meals) || []).forEach((m) => {
-        const l = meals[m.id]; if (!l || !l.eaten || ex.includes("meal:" + m.id)) return;
-        (l.foods || m.foods || []).forEach((f) => { if (re.test(f.name || "")) q += Number(f.grams) || 0; });
+      const plan = ctx.nutPlan || {}; const planned = (plan.fixed || []).concat(plan.meals || []);
+      Object.keys(meals).forEach((id) => {
+        const l = meals[id]; if (!l || !l.eaten || ex.includes("meal:" + id)) return;
+        const m = planned.find((x) => x.id === id);
+        (l.foods || (m && m.foods) || []).forEach((f) => { if (re.test(f.name || "")) q += Number(f.grams) || 0; });
       });
     }
     return q;
@@ -557,7 +651,18 @@ window.SHRED_DATA = (function () {
     return null;
   }
 
-  const api = { isOn, cycleInfo, dayUse, countFrom, status, recount, countable, orderGroup, nextRecount, addDays, diffDays };
+  /* Semaine alimentaire (nutritionWeeks/<lundi>). mealWeek : lundi de la semaine de la date (dimanche = 7e jour).
+     prepWeek : semaine que l'on prépare — le dimanche, courses et batch visent la semaine qui commence le lendemain. */
+  const mealWeek = (date) => addDays(date, -((parse(date).getUTCDay() + 6) % 7));
+  const prepWeek = (date) => (parse(date).getUTCDay() === 0 ? addDays(date, 1) : mealWeek(date));
+  /* Liste de courses d'une semaine : { total, done, left[] } à partir du plan et du document de la semaine. */
+  function shoppingState(plan, week) {
+    const items = (plan && plan.shopping && plan.shopping.items) || []; const checked = (week && week.shopping && week.shopping.checked) || {};
+    const left = items.filter((i) => !checked[i.id]);
+    return { total: items.length, done: items.length - left.length, left };
+  }
+
+  const api = { mealWeek, prepWeek, shoppingState, isOn, cycleInfo, dayUse, countFrom, status, recount, countable, orderGroup, nextRecount, addDays, diffDays };
   root.ShredStock = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
@@ -570,7 +675,7 @@ window.SHRED_DATA = (function () {
    - today : date du jour à Bangkok (YYYY-MM-DD) ; docs : { "collection/id": data } comme dans l'app
    - logs : { clé: "YYYY-MM-DD" du dernier envoi } ; D = SHRED_DATA ; S = ShredStock
    Modes : morning (stock + cycles, 08:00), evening (séance non enregistrée, 20:30),
-           neck (bloc cou du mercredi, 07:30), measures (mensurations + photos, dimanche 10:00, deux notifications),
+           neck (bloc cou du mercredi, 07:30), measures (dimanche 10:00 : mensurations, photos, courses + batch — trois notifications distinctes),
            weekly (recomptage mensuel, 1er dimanche du mois 21:00),
            catchup (rattrapage stock à l'abonnement), test. */
 (function (root) {
@@ -588,9 +693,11 @@ window.SHRED_DATA = (function () {
     const def = Object.fromEntries(D.SUPPLEMENTS.items.map((i) => [i.id, i]));
     const cycleOf = (id) => { const i = plan.items.find((x) => x.id === id); return i && i.cycleStart ? i : def[id] || null; };
     const ctx = { supLog: (d) => get("supplementLogs/" + d), nutLog: (d) => get("nutritionLogs/" + d), nutPlan: get("nutrition/plan") || D.NUTRITION, cycleOf };
+    // Plan alimentaire au nouveau format (semaine, courses) ; un ancien plan en base ne compte pas.
+    const food = ctx.nutPlan && ctx.nutPlan.week ? ctx.nutPlan : D.NUTRITION;
     const ids = new Set(D.STOCK.map((l) => l.id));
     const lines = D.STOCK.map((l) => ({ ...l, ...(get("stock/" + l.id) || {}) })).concat(list("stock").filter((x) => !ids.has(x.id)).map((x) => x.data));
-    return { get, list, plan, def, ctx, lines, cycleOf };
+    return { get, list, plan, def, ctx, lines, cycleOf, food };
   }
 
   // Date du plus ancien comptage : les journaux de prises à charger commencent là.
@@ -692,6 +799,11 @@ window.SHRED_DATA = (function () {
         const ph = c.get("photos/" + today) || {};
         if (["face", "profilG", "profilD", "dos", "profil"].some((k) => ph[k])) skipped.push("photos : déjà prises");
         else once("photos:" + today, () => ({ title: "Photos de la semaine", body: "Face, profil gauche, profil droit, dos : même lumière, même heure, torse nu.", url: "#track?photos", tag: "photos" }));
+        // Courses + batch de la semaine qui commence demain : seulement tant que la liste n'est pas entièrement cochée.
+        const shop = S.shoppingState(c.food, c.get("nutritionWeeks/" + S.prepWeek(today)));
+        if (!shop.total) skipped.push("courses : pas de liste dans le plan");
+        else if (!shop.left.length) skipped.push("courses : liste entièrement cochée");
+        else once("courses:" + today, () => ({ title: "Courses + batch", body: `${shop.left.length} article${shop.left.length > 1 ? "s" : ""} à cocher, puis le batch du dimanche (~${(c.food.batch && c.food.batch.minutes) || 60} min).`, url: "#nutrition?courses", tag: "courses" }));
       }
     }
 
@@ -745,7 +857,7 @@ async function loadDocs(db, uid, today) {
     q((x) => x.eq("collection", "supplementLogs").gte("path", "supplementLogs/" + from)),
     q((x) => x.eq("collection", "nutritionLogs").gte("path", "nutritionLogs/" + from)),
     q((x) => x.eq("collection", "sessions").like("path", `sessions/${today}%`)),
-    q((x) => x.in("path", ["measurements/" + today, "photos/" + today])),
+    q((x) => x.in("path", ["measurements/" + today, "photos/" + today, "nutritionWeeks/" + S.prepWeek(today)])),
   ]);
   logs.flat().forEach((r) => (docs[r.path] = r.data));
   return docs;

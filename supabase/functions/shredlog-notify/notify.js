@@ -5,7 +5,7 @@
    - today : date du jour à Bangkok (YYYY-MM-DD) ; docs : { "collection/id": data } comme dans l'app
    - logs : { clé: "YYYY-MM-DD" du dernier envoi } ; D = SHRED_DATA ; S = ShredStock
    Modes : morning (stock + cycles, 08:00), evening (séance non enregistrée, 20:30),
-           neck (bloc cou du mercredi, 07:30), measures (mensurations + photos, dimanche 10:00, deux notifications),
+           neck (bloc cou du mercredi, 07:30), measures (dimanche 10:00 : mensurations, photos, courses + batch — trois notifications distinctes),
            weekly (recomptage mensuel, 1er dimanche du mois 21:00),
            catchup (rattrapage stock à l'abonnement), test. */
 (function (root) {
@@ -23,9 +23,11 @@
     const def = Object.fromEntries(D.SUPPLEMENTS.items.map((i) => [i.id, i]));
     const cycleOf = (id) => { const i = plan.items.find((x) => x.id === id); return i && i.cycleStart ? i : def[id] || null; };
     const ctx = { supLog: (d) => get("supplementLogs/" + d), nutLog: (d) => get("nutritionLogs/" + d), nutPlan: get("nutrition/plan") || D.NUTRITION, cycleOf };
+    // Plan alimentaire au nouveau format (semaine, courses) ; un ancien plan en base ne compte pas.
+    const food = ctx.nutPlan && ctx.nutPlan.week ? ctx.nutPlan : D.NUTRITION;
     const ids = new Set(D.STOCK.map((l) => l.id));
     const lines = D.STOCK.map((l) => ({ ...l, ...(get("stock/" + l.id) || {}) })).concat(list("stock").filter((x) => !ids.has(x.id)).map((x) => x.data));
-    return { get, list, plan, def, ctx, lines, cycleOf };
+    return { get, list, plan, def, ctx, lines, cycleOf, food };
   }
 
   // Date du plus ancien comptage : les journaux de prises à charger commencent là.
@@ -127,6 +129,11 @@
         const ph = c.get("photos/" + today) || {};
         if (["face", "profilG", "profilD", "dos", "profil"].some((k) => ph[k])) skipped.push("photos : déjà prises");
         else once("photos:" + today, () => ({ title: "Photos de la semaine", body: "Face, profil gauche, profil droit, dos : même lumière, même heure, torse nu.", url: "#track?photos", tag: "photos" }));
+        // Courses + batch de la semaine qui commence demain : seulement tant que la liste n'est pas entièrement cochée.
+        const shop = S.shoppingState(c.food, c.get("nutritionWeeks/" + S.prepWeek(today)));
+        if (!shop.total) skipped.push("courses : pas de liste dans le plan");
+        else if (!shop.left.length) skipped.push("courses : liste entièrement cochée");
+        else once("courses:" + today, () => ({ title: "Courses + batch", body: `${shop.left.length} article${shop.left.length > 1 ? "s" : ""} à cocher, puis le batch du dimanche (~${(c.food.batch && c.food.batch.minutes) || 60} min).`, url: "#nutrition?courses", tag: "courses" }));
       }
     }
 

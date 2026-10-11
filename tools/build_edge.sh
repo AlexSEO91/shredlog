@@ -13,3 +13,5 @@ assert src.count(marker) == 1
 open('supabase/deploy/shredlog-notify.ts', 'w').write(src.replace(marker, '\n'.join(parts)))
 print('supabase/deploy/shredlog-notify.ts ok')
 PY
+# Bundle réduit (sous 35 Ko, déployable par le connecteur) : mêmes sources, données limitées à ce que le calcul lit.
+node tools/build_edge_min.js

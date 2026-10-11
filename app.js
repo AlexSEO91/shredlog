@@ -21,7 +21,7 @@
   const fmtK = (v) => v == null ? "–" : String(Math.round(v * 10) / 10);
 
   /* ───────────────────────── Store : local-first + db ───────────────────────── */
-  const COLLECTIONS = ["program", "programVersions", "sessions", "measurements", "photos", "supplementLogs", "nutritionLogs", "reviews", "settings", "nutrition", "supplements", "stock", "meta"];
+  const COLLECTIONS = ["program", "programVersions", "sessions", "measurements", "photos", "supplementLogs", "nutritionLogs", "nutritionVersions", "nutritionWeeks", "reviews", "settings", "nutrition", "supplements", "stock", "meta"];
   const Store = {
     docs: {}, pending: new Set(), db: null, assets: null, downloads: null, mode: "local", listeners: [],
     loadLocal() {
@@ -115,14 +115,15 @@
     supplements() { return Store.get("supplements/plan") || D.SUPPLEMENTS; },
     // Stock : état initial de data.js, remplacé ligne par ligne par stock/<id> dès qu'il existe en base.
     stockLines() { const ids = new Set(D.STOCK.map((l) => l.id)); const extra = Store.list("stock").filter((x) => !ids.has(x.id)).map((x) => x.data); return D.STOCK.map((l) => ({ ...clone(l), ...(Store.get("stock/" + l.id) || {}) })).concat(extra); },
-    stockCtx() { const plan = this.supplements(); const def = Object.fromEntries(D.SUPPLEMENTS.items.map((i) => [i.id, i])); return { supLog: (d) => Store.get("supplementLogs/" + d), nutLog: (d) => Store.get("nutritionLogs/" + d), nutPlan: this.nutrition(), cycleOf: (id) => { const i = plan.items.find((x) => x.id === id); return i && i.cycleStart ? i : def[id] || null; } }; },
+    stockCtx() { const plan = this.supplements(); const def = Object.fromEntries(D.SUPPLEMENTS.items.map((i) => [i.id, i])); return { supLog: (d) => Store.get("supplementLogs/" + d), nutLog: (d) => Store.get("nutritionLogs/" + d), nutPlan: Store.get("nutrition/plan") || D.NUTRITION, cycleOf: (id) => { const i = plan.items.find((x) => x.id === id); return i && i.cycleStart ? i : def[id] || null; } }; },
     cycleOf(id) { return this.stockCtx().cycleOf(id); },
     // Liste du jour : les compléments en phase OFF n'y figurent pas (ils sont « en pause »).
     activeItems(date = isoDate()) { return this.supplements().items.filter((i) => window.ShredStock.isOn(this.cycleOf(i.id), date)); },
     pausedItems(date = isoDate()) { return this.supplements().items.map((i) => ({ item: i, cyc: window.ShredStock.cycleInfo(this.cycleOf(i.id), date) })).filter((x) => !x.cyc.on); },
     stock(today = isoDate()) { const ctx = this.stockCtx(); return this.stockLines().map((l) => ({ line: l, st: window.ShredStock.status(l, today, ctx) })).sort((a, b) => (a.st.rupture || "9999") < (b.st.rupture || "9999") ? -1 : (a.st.rupture || "9999") > (b.st.rupture || "9999") ? 1 : 0); },
     saveStock(line) { Store.set("stock/" + line.id, line); },
-    nutrition() { return Store.get("nutrition/plan") || D.NUTRITION; },
+    // Plan alimentaire : celui de la base s'il est au format semaine / plats, sinon le plan initial de data.js.
+    nutrition() { const p = Store.get("nutrition/plan"); return p && p.week && p.dishes ? p : D.NUTRITION; },
     // Séance principale du jour (le bloc cou est un jour distinct, kind "neck", le même jour de la semaine).
     dayByWeekday(wd) { const p = this.program(); return p ? p.days.find((d) => d.weekday === wd && d.kind !== "neck") : null; },
     neckByWeekday(wd) { const p = this.program(); return p ? p.days.find((d) => d.weekday === wd && d.kind === "neck" && d.exercises.length) : null; },
@@ -306,7 +307,7 @@
       <a class="tile" href="#supps"><span>Compléments<span class="sub">${supDone}/${sup.items.length} pris</span></span><span class="ic">${ICON.pill}</span></a>
       <a class="tile" href="#track"><span>Suivi<span class="sub">${lastM ? "mesuré il y a " + daysSince(lastM.date) + " j" : "à mesurer"}</span></span><span class="ic">${ICON.track}</span></a>
       <a class="tile" href="#track?photos"><span>Photos<span class="sub">${lastP ? "il y a " + daysSince(lastP.date) + " j" : "aucune"}</span></span><span class="ic">${ICON.photo}</span></a>
-      <a class="tile" href="#nutrition"><span>Nutrition<span class="sub">${Data.nutrition().meals.length} repas</span></span><span class="ic">${ICON.food}</span></a>
+      <a class="tile" href="#nutrition"><span>Nutrition<span class="sub">${(() => { const ms = plannedMeals(today); const l = Store.get("nutritionLogs/" + today); return ms.filter((m) => l && l.meals && l.meals[m.slot] && l.meals[m.slot].eaten).length + "/" + ms.length; })()} repas</span></span><span class="ic">${ICON.food}</span></a>
       <a class="tile" href="#program"><span>Programme<span class="sub">v${Data.program() ? Data.program().version : "–"}</span></span><span class="ic">${ICON.prog}</span></a>
     </div>
     <div class="card" style="margin-top:14px">
@@ -691,31 +692,77 @@
     ${groupCard}${cards}`;
   }
 
-  /* ───────────────────────── Nutrition ───────────────────────── */
-  function mealTotals(foods) { return foods.reduce((a, f) => ({ kcal: a.kcal + (f.kcal || 0), protein: a.protein + (f.protein || 0), carbs: a.carbs + (f.carbs || 0), fat: a.fat + (f.fat || 0) }), { kcal: 0, protein: 0, carbs: 0, fat: 0 }); }
-  function dayFoods(plan, log) { return plan.meals.map((m) => { const l = (log.meals || {})[m.id] || {}; const foods = l.foods || m.foods; return { meal: m, eaten: !!l.eaten, foods, modified: !!l.foods }; }); }
-  function renderNutrition() {
-    const plan = Data.nutrition(); const date = UI.nutDate; const log = Store.get("nutritionLogs/" + date) || { date, meals: {} };
-    const rows = dayFoods(plan, log); const eaten = rows.filter((r) => r.eaten); const tot = mealTotals(eaten.flatMap((r) => r.foods)); const t = plan.targets;
-    const macro = (k, lab, unit) => `<div><b>${Math.round(tot[k])}<span class="tiny faint">/${t[k]}</span></b><span>${lab}</span><div class="progress" style="height:4px;margin-top:4px"><i style="width:${Math.min(100, Math.round(100 * tot[k] / Math.max(1, t[k])))}%"></i></div></div>`;
-    const meals = rows.map((r) => { const mt = mealTotals(r.foods); return `<div class="card" style="padding:12px 14px"><div class="row between"><div class="row">${checkbox(r.eaten, "meal-eaten", `data-id="${r.meal.id}"`)}<div><b>${esc(r.meal.name)}</b> <span class="tiny faint">${esc(r.meal.time || "")}${r.modified ? " · modifié" : ""}</span><div class="s tiny muted">${Math.round(mt.kcal)} kcal · P ${Math.round(mt.protein)} · G ${Math.round(mt.carbs)} · L ${Math.round(mt.fat)}</div></div></div><button class="btn sm ghost" data-act="meal-edit" data-id="${r.meal.id}">Modifier</button></div>
-      ${r.foods.length ? `<div class="scroll"><table class="tbl" style="margin-top:8px"><tbody>${r.foods.map((f) => `<tr><td>${esc(f.name)}</td><td class="r">${f.grams} g</td><td class="r">${Math.round(f.kcal)} kcal</td><td class="r tiny muted">P ${Math.round(f.protein)} · G ${Math.round(f.carbs)} · L ${Math.round(f.fat)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="tiny faint" style="margin-top:6px">Aucun aliment défini — le plan sera importé plus tard.</p>'}</div>`; }).join("");
-    return `
-    <div class="card"><div class="row between" style="margin-bottom:8px"><div class="eyebrow">Journée</div><input type="date" value="${date}" style="width:auto" data-bind="nut-date"></div>
-      <div class="macro">${macro("kcal", "kcal")}${macro("protein", "prot. g")}${macro("carbs", "gluc. g")}${macro("fat", "lip. g")}</div>
-      ${plan.note ? `<p class="tiny faint" style="margin-top:8px">${esc(plan.note)}</p>` : ""}</div>
-    ${meals}
-    <div class="btnrow"><button class="btn ghost" data-act="nut-targets">Objectifs</button><button class="btn ghost" data-act="nut-add-meal">+ Repas</button><a class="btn ghost" href="#export">Importer un plan</a></div>`;
+  /* ───────────────────────── Alimentation ───────────────────────── */
+  // Le plan (nutrition/plan) est écrit par Claude : phase, cibles, plats, courses. L'app l'affiche, tient le journal
+  // du jour (nutritionLogs/<date>) et l'état de la semaine (nutritionWeeks/<lundi>) ; elle ne décide jamais de la phase.
+  const MACROS = [["kcal", "kcal"], ["protein", "prot. g"], ["carbs", "gluc. g"], ["fat", "lip. g"]];
+  const zeroMacros = () => ({ kcal: 0, protein: 0, carbs: 0, fat: 0 });
+  const addMacros = (a, m) => { MACROS.forEach(([k]) => (a[k] += Number(m && m[k]) || 0)); return a; };
+  function mealTotals(foods) { return foods.reduce((a, f) => addMacros(a, f), zeroMacros()); }
+  // Macros d'un repas du journal : la copie du jour, sinon la somme des aliments (journaux de l'ancien plan).
+  const mealMacros = (m) => (m && m.macros) || mealTotals((m && m.foods) || []);
+  const macroLine = (m) => `${Math.round(m.kcal)} kcal · P ${Math.round(m.protein)} · G ${Math.round(m.carbs)} · L ${Math.round(m.fat)}`;
+  const phaseLabel = (plan, id) => ((plan.phases || {})[id] || {}).label || id || "–";
+  // Repas prévus pour une date : matin, midi, shake, soir. Midi et soir suivent la semaine type, dans l'ordre de la
+  // semaine (nutritionWeeks.order) si deux jours ont été échangés.
+  function plannedMeals(date) {
+    const plan = Data.nutrition(); const wd = (parseDate(date).getDay() + 6) % 7; // lundi = 0
+    const wk = Store.get("nutritionWeeks/" + window.ShredStock.mealWeek(date)); const order = (wk && wk.order) || [1, 2, 3, 4, 5, 6, 7];
+    const day = plan.week.find((d) => d.weekday === order[wd]) || plan.week[wd] || {};
+    const fixed = (plan.fixed || []).map((f) => ({ slot: f.id, small: true, label: f.name, name: f.name, content: f.content, note: f.note, macros: f.macros, foods: f.foods }));
+    const dishOf = (slot, label) => { const d = plan.dishes[day[slot]]; return d ? { slot, label, dishId: day[slot], name: d.name, ingredients: d.ingredients, sauce: d.sauce, macros: d.macros, blocks: d.blocks, estimated: d.macrosEstimated } : null; };
+    return [...fixed.slice(0, 1), dishOf("midi", "Midi"), ...fixed.slice(1), dishOf("soir", "Soir")].filter(Boolean);
   }
-  function mealEditSheet(mealId, foodsOverride) {
-    const plan = Data.nutrition(); const m = plan.meals.find((x) => x.id === mealId); const date = UI.nutDate; const log = Store.get("nutritionLogs/" + date) || { date, meals: {} };
-    const l = (log.meals || {})[mealId] || {}; const foods = foodsOverride || clone(l.foods || m.foods);
-    const rows = foods.map((f, i) => `<div class="row" style="margin-top:8px"><div class="grow small"><b>${esc(f.name)}</b><div class="tiny muted">${Math.round(f.kcal)} kcal pour ${f.grams} g</div></div><div class="unit" style="width:110px;position:relative"><input type="number" inputmode="decimal" value="${f.grams}" data-bind="food-g" data-i="${i}" aria-label="grammes ${esc(f.name)}"><span style="position:absolute;right:10px;top:50%;transform:translateY(-50%)" class="tiny faint">g</span></div><button class="tiny" style="color:var(--red)" data-act="food-del" data-i="${i}">✕</button></div>`).join("");
-    UI.editFoods = foods; UI.editMeal = mealId;
-    sheet(`<h3>${esc(m.name)} · ${fmtDate(date)}</h3><p class="small muted">Change les grammes (les macros suivent), retire un aliment ou ajoutes-en un. Ça ne modifie que cette journée.</p>${rows}
-      <div class="card flat" style="margin-top:12px;padding:10px"><div class="eyebrow" style="margin-bottom:6px">Ajouter un aliment</div><input type="text" id="nf-name" placeholder="Nom"><div class="grid2" style="margin-top:6px"><input type="number" id="nf-g" placeholder="g" inputmode="decimal"><input type="number" id="nf-kcal" placeholder="kcal" inputmode="decimal"></div><div class="grid3" style="margin-top:6px"><input type="number" id="nf-p" placeholder="prot g" inputmode="decimal"><input type="number" id="nf-c" placeholder="gluc g" inputmode="decimal"><input type="number" id="nf-f" placeholder="lip g" inputmode="decimal"></div><button class="btn sm ghost" style="margin-top:8px" data-act="food-add">Ajouter</button></div>
-      <div class="btnrow" style="margin-top:12px"><button class="btn primary" data-act="meal-save">Enregistrer pour ce jour</button><button class="btn ghost" data-act="meal-save-plan">Enregistrer dans le plan</button></div>
-      <button class="btn line wide sm" style="margin-top:8px" data-act="meal-reset">Revenir au plan</button>`);
+  // Bilan d'une journée du journal : repas cochés, cumul, cibles DU JOUR (copiées dans le journal à la première case cochée).
+  function nutDay(log) {
+    const plan = Data.nutrition(); const meals = (log && log.meals) || {};
+    const eaten = Object.keys(meals).filter((id) => meals[id] && meals[id].eaten);
+    return { eaten, tot: eaten.reduce((a, id) => addMacros(a, mealMacros(meals[id])), zeroMacros()), targets: (log && log.targets) || plan.targets, phase: (log && log.phase) || plan.phase, planned: log && log.planVersion != null ? (plan.fixed || []).length + 2 : Math.max(Object.keys(meals).length, eaten.length) };
+  }
+  function renderNutrition() {
+    if (location.hash.includes("courses")) UI.nutTab = "courses";
+    const tab = UI.nutTab === "courses" ? "courses" : "today";
+    const tabs = `<div class="tabs" style="margin-bottom:14px"><button class="${tab === "today" ? "on" : ""}" data-act="nut-tab" data-v="today">Aujourd'hui</button><button class="${tab === "courses" ? "on" : ""}" data-act="nut-tab" data-v="courses">Courses</button></div>`;
+    return tabs + (tab === "courses" ? renderShopping() : renderNutToday());
+  }
+  function renderNutToday() {
+    const plan = Data.nutrition(); const date = UI.nutDate; const log = Store.get("nutritionLogs/" + date) || { date, meals: {} };
+    const day = nutDay(log); const t = day.targets; const planned = plannedMeals(date);
+    const macro = ([k, lab]) => `<div><b>${Math.round(day.tot[k])}<span class="tiny faint">/${t[k] != null ? t[k] : "–"}</span></b><span>${lab}</span><div class="progress" style="height:4px;margin-top:4px"><i style="width:${t[k] ? Math.min(100, Math.round(100 * day.tot[k] / t[k])) : 0}%"></i></div></div>`;
+    const qty = (i) => (i.unit === "pièce" ? String(i.qty) : `${String(i.qty).replace(".", ",")} ${esc(i.unit)}`);
+    const meals = planned.map((p) => {
+      const l = (log.meals || {})[p.slot]; const on = !!(l && l.eaten); const shown = on ? { ...p, name: l.name || p.name, macros: mealMacros(l) } : p; // coché : ce qui a été enregistré ce jour-là
+      const changed = on && p.dishId && l.dishId && l.dishId !== p.dishId;
+      if (p.small) return `<div class="card" style="padding:10px 14px"><div class="row">${checkbox(on, "meal-eaten", `data-id="${p.slot}"`)}<div class="grow"><b>${esc(p.label)}</b> <span class="tiny muted">${macroLine(shown.macros)}</span><div class="s small">${esc(p.content || "")}</div>${p.note ? `<div class="tiny faint">${esc(p.note)}</div>` : ""}</div></div></div>`;
+      return `<div class="card" style="padding:12px 14px"><div class="row" style="align-items:flex-start">${checkbox(on, "meal-eaten", `data-id="${p.slot}"`)}<div class="grow"><div class="eyebrow">${esc(p.label)}</div><h3 style="margin:2px 0">${esc(shown.name)}</h3><div class="tiny muted">${macroLine(shown.macros)}${p.estimated ? " · estimé" : ""}</div></div></div>
+        ${changed ? `<p class="tiny faint" style="margin-top:6px">Enregistré ce jour-là ; le plan actuel prévoit : ${esc(p.name)}.</p>` : `<div class="scroll"><table class="tbl" style="margin-top:8px"><tbody>${p.ingredients.map((i) => `<tr><td>${esc(i.name)}</td><td class="r"><b>${qty(i)}</b></td></tr>`).join("")}</tbody></table></div>${p.sauce ? `<p class="tiny muted" style="margin-top:6px">+ ${esc(p.sauce)}</p>` : ""}`}</div>`; }).join("");
+    const slots = new Set(planned.map((p) => p.slot));
+    const legacy = Object.keys(log.meals || {}).filter((id) => !slots.has(id) && log.meals[id] && log.meals[id].eaten).map((id) => `<div class="item"><div class="grow"><div class="t small">${esc(log.meals[id].name || id)}</div><div class="s">${macroLine(mealMacros(log.meals[id]))}</div></div><span class="badge">ancien plan</span></div>`).join("");
+    return `
+    <div class="card"><div class="row between" style="margin-bottom:8px"><div><div class="eyebrow">Journée · ${day.eaten.length}/${planned.length} repas</div><span class="badge acc">${esc(phaseLabel(plan, day.phase))}</span> <span class="tiny faint">plan v${log.planVersion != null ? log.planVersion : plan.version}</span></div><input type="date" value="${date}" style="width:auto" data-bind="nut-date"></div>
+      <div class="macro">${MACROS.map(macro).join("")}</div>
+      <p class="tiny faint" style="margin-top:8px">Cumul des repas cochés face à la cible de la phase. Macros des plats estimées à partir des ingrédients ; tes portions sont pesées (viande crue, riz et pommes de terre cuits, pâtes en sec).</p></div>
+    ${meals}${legacy ? `<div class="card"><div class="list">${legacy}</div></div>` : ""}`;
+  }
+  // Courses : liste de la semaine préparée (le dimanche, celle qui commence le lendemain). Un document par semaine
+  // dans nutritionWeeks : la liste repart donc de zéro toute seule, et l'historique reste.
+  function shoppingWeek() { const key = window.ShredStock.prepWeek(isoDate()); return { key, doc: Store.get("nutritionWeeks/" + key) || { weekStart: key } }; }
+  function renderShopping() {
+    const plan = Data.nutrition(); const sh = plan.shopping || { items: [], groups: {} }; const { key, doc } = shoppingWeek();
+    const checked = (doc.shopping && doc.shopping.checked) || {}; const st = window.ShredStock.shoppingState(plan, doc);
+    const groups = sh.groups || {}; const thb = (v) => `${Math.round(v).toLocaleString("fr-FR")} THB`;
+    const price = (items, onlyLeft) => items.filter((i) => !onlyLeft || !checked[i.id]).reduce((a, i) => a + (i.priceTHB || 0), 0) + Object.keys(groups).filter((g) => items.some((i) => i.group === g && (!onlyLeft || !checked[i.id]))).reduce((a, g) => a + (groups[g].priceTHB || 0), 0);
+    const aisles = [...new Set(sh.items.map((i) => i.aisle || "Divers"))];
+    const cards = aisles.map((a) => { const items = sh.items.filter((i) => (i.aisle || "Divers") === a); const gs = [...new Set(items.map((i) => i.group).filter(Boolean))];
+      return `<div class="card" style="padding:12px 14px"><div class="row between" style="margin-bottom:4px"><div><b>${esc(a)}</b> <span class="tiny faint">${items.filter((i) => checked[i.id]).length}/${items.length}</span></div><span class="tiny muted">~${thb(price(items))}</span></div>
+        ${gs.map((g) => `<p class="tiny muted">${esc(groups[g].name)} : ~${thb(groups[g].priceTHB || 0)} pour l'ensemble</p>`).join("")}
+        ${items.map((i) => `<div class="sup">${checkbox(!!checked[i.id], "shop-toggle", `data-id="${i.id}"`)}<div class="grow"><div class="t" style="${checked[i.id] ? "text-decoration:line-through;color:var(--ink3)" : ""}">${esc(i.name)}</div>${i.qty ? `<div class="s">${esc(i.qty)}</div>` : ""}</div>${i.priceTHB != null ? `<span class="stkq">${thb(i.priceTHB)}</span>` : ""}</div>`).join("")}</div>`; }).join("");
+    return `
+    <div class="card"><div class="row between"><div><div class="eyebrow">Semaine du ${fmtDate(key, true)}</div><div class="big">${st.done}<span style="font-size:22px;color:var(--ink3)">/${st.total}</span></div></div><div style="text-align:right"><b>~${thb(price(sh.items))}</b><div class="tiny muted">reste ~${thb(price(sh.items, true))}</div></div></div>
+      <div class="progress" style="margin-top:8px"><i style="width:${Math.round(100 * st.done / Math.max(1, st.total))}%"></i></div>
+      <p class="tiny faint" style="margin-top:8px">Une semaine pour 4. La liste repart de zéro chaque dimanche, pour la semaine qui commence le lundi.</p></div>
+    ${cards}
+    ${st.done ? `<button class="btn line wide sm" data-act="shop-reset">Tout décocher</button>` : ""}`;
   }
 
   /* ───────────────────────── Bilan & ajustements ───────────────────────── */
@@ -739,14 +786,14 @@
   }
   function measureRows() { const s = Data.settings(); return Data.measurements().map((m) => { const o = { date: m.date }; D.MEASURE_FIELDS.forEach((f) => (o[f.id] = m[f.id] ?? "")); o.masse_grasse_estimee = navyBF(m.waistRelaxed, m.neck, s.heightCm) ?? ""; o.note = m.note || ""; return o; }); }
   function suppRows() { return Store.list("supplementLogs").map((x) => x.data).map((l) => { const act = Data.activeItems(l.date); const off = Data.pausedItems(l.date); return { date: l.date, pris: act.filter((i) => l.taken[i.id]).length, total: act.length, manques: act.filter((i) => !l.taken[i.id]).map((i) => i.name).join(", "), en_pause: off.map((x) => x.item.name).join(", ") }; }); }
-  function nutritionRows() { const plan = Data.nutrition(); return Store.list("nutritionLogs").map((x) => x.data).map((l) => { const rows = dayFoods(plan, l); const tot = mealTotals(rows.filter((r) => r.eaten).flatMap((r) => r.foods)); return { date: l.date, repas_valides: rows.filter((r) => r.eaten).length, repas_prevus: rows.length, kcal: Math.round(tot.kcal), proteines: Math.round(tot.protein), glucides: Math.round(tot.carbs), lipides: Math.round(tot.fat), cible_kcal: plan.targets.kcal, cible_prot: plan.targets.protein }; }); }
+  function nutritionRows() { const plan = Data.nutrition(); return Store.list("nutritionLogs").map((x) => x.data).map((l) => { const d = nutDay(l); return { date: l.date, phase: phaseLabel(plan, d.phase), repas_valides: d.eaten.length, repas_prevus: d.planned, kcal: Math.round(d.tot.kcal), proteines: Math.round(d.tot.protein), glucides: Math.round(d.tot.carbs), lipides: Math.round(d.tot.fat), cible_kcal: d.targets.kcal ?? "", cible_prot: d.targets.protein ?? "" }; }); }
   function aiSummary(weekOff) {
     if (weekOff != null) { const w = weekStats(weekOff); const s = Data.settings(); const lines = [`# Shredlog — bilan semaine ${w.start} → ${w.end}`, `Programme réalisé : ${w.setPct} % (${w.doneSets}/${w.plannedSets} séries) · Séances : ${w.sessions.length}/${w.planned.length}${w.missed.length ? " (manquées : " + w.missed.map((d) => d.name).join(", ") + ")" : ""} · volume ${Math.round(w.volume)} kg×reps · compléments ${w.supPct == null ? "–" : w.supPct + " %"}`, ""]; w.sessions.forEach((x) => { lines.push(`## ${x.date} — ${x.dayName} (${sessionProgress(x)} %)`); x.exercises.filter((e) => !e.warmup).forEach((e) => { const done = e.sets.filter((q) => q.done); lines.push(`- ${w.nameOf({ ...e, session: x })} [${e.variant}] : ${e.doneSets}/${e.targetSets} séries, ${done.map((q) => `${q.kg != null ? q.kg + "kg" : "PDC"}×${q.reps}`).join(" ") || "–"}${e.difficulty ? " · " + e.difficulty : ""}${e.pain ? " · DOULEUR" : ""}${e.skipped ? " · passé" : ""}${e.note ? " · " + e.note : ""}`); }); }); if (w.m.length) { lines.push("", "## Mesures"); w.m.forEach((m) => lines.push(`- ${m.date} : ${fmtK(m.weight)} kg, taille ${fmtK(m.waistRelaxed)} cm, cou ${fmtK(m.neck)}, MG est. ${fmtK(navyBF(m.waistRelaxed, m.neck, s.heightCm))} %`)); } return lines.join("\n"); }
     const s = Data.settings(); const ms = Data.measurements(); const last = ms[ms.length - 1]; const sessions = Data.sessions().filter((x) => x.status === "done").slice(0, 10);
     const lines = [`# Shredlog — résumé pour l'IA (${fmtDate(isoDate(), true)})`, `Profil : ${s.name}, ${s.heightCm} cm, objectif shred (~12 % MG) + volume haut du corps + posture. Programme v${Data.program() ? Data.program().version : "?"}.`, "", "## Dernières mensurations", ...ms.slice(-4).map((m) => `- ${m.date} : poids ${fmtK(m.weight)} kg, taille ${fmtK(m.waistRelaxed)} cm, cou ${fmtK(m.neck)}, bras D ${fmtK(m.armR)}, MG est. ${fmtK(navyBF(m.waistRelaxed, m.neck, s.heightCm))} %${m.note ? " — " + m.note : ""}`), "", "## 10 dernières séances"];
     sessions.forEach((x) => { const day = Data.dayById(x.dayId); lines.push(`### ${x.date} — ${x.dayName} (${sessionProgress(x)} %)`); x.exercises.filter((e) => !e.warmup).forEach((e) => { const pe = day && day.exercises.find((q) => q.id === e.id); const info = pe ? Data.exInfo(pe[e.variant]) : null; const done = e.sets.filter((q) => q.done); lines.push(`- ${info ? info.name : e.id} [${e.variant}] : ${e.doneSets}/${e.targetSets} séries, ${done.map((q) => `${q.kg != null ? q.kg + "kg" : "PDC"}×${q.reps}`).join(" ") || "–"}${e.difficulty ? " · " + e.difficulty : ""}${e.pain ? " · DOULEUR" : ""}${e.skipped ? " · passé" : ""}${e.note ? " · " + e.note : ""}`); }); });
     const sr = suppRows().slice(-7); if (sr.length) { lines.push("", "## Compléments (7 derniers jours)"); sr.forEach((r) => lines.push(`- ${r.date} : ${r.pris}/${r.total}${r.manques ? " (manqués : " + r.manques + ")" : ""}${r.en_pause ? " · en pause (cycle) : " + r.en_pause : ""}`)); }
-    const nr = nutritionRows().slice(-7); if (nr.length) { lines.push("", "## Nutrition (7 derniers jours)"); nr.forEach((r) => lines.push(`- ${r.date} : ${r.kcal} kcal, P ${r.proteines} g (cible ${r.cible_kcal} / ${r.cible_prot})`)); }
+    const nr = nutritionRows().slice(-7); if (nr.length) { lines.push("", "## Nutrition (7 derniers jours)"); nr.forEach((r) => lines.push(`- ${r.date} : ${r.kcal} kcal, P ${r.proteines} g (cible ${r.cible_kcal} / ${r.cible_prot}) · ${r.repas_valides}/${r.repas_prevus} repas · phase ${r.phase}`)); }
     return lines.join("\n");
   }
   /* Export complet : un seul fichier Markdown avec tout l'historique, sans fenêtre glissante (ordre chronologique). */
@@ -788,12 +835,18 @@
     L.push("", `### Stock au ${today}`);
     Data.stock().forEach(({ line: l, st }) => L.push(`- ${one(l.name)} : reste ${fmtQty(st.unitsLeft, l.unit)} · ${fmtQty(l.dosePerDay, l.unit)}/jour · rupture ${st.rupture || "–"} · seuil de commande ${st.alertDate || "–"}${st.ordered ? ` · commandé le ${l.orderedAt}` : ""}${st.effectiveFrom ? ` · décompte à partir du ${st.effectiveFrom} (pilulier)` : ""}`));
 
-    const nut = Data.nutrition(); const r1 = (v) => Math.round(v);
-    L.push("", "## Nutrition", "", `Cibles : ${nut.targets.kcal} kcal · protéines ${nut.targets.protein} g · glucides ${nut.targets.carbs} g · lipides ${nut.targets.fat} g.`, "", "### Journal (repas validés uniquement)");
-    nutLogs.forEach((l) => { const rows = dayFoods(nut, l); const eaten = rows.filter((r) => r.eaten); const t = mealTotals(eaten.flatMap((r) => r.foods));
-      L.push(`- ${l.date} : ${r1(t.kcal)} kcal · P ${r1(t.protein)} g · G ${r1(t.carbs)} g · L ${r1(t.fat)} g · ${eaten.length}/${rows.length} repas`);
-      eaten.forEach((r) => L.push(`  - ${one(r.meal.name)}${r.modified ? " (modifié)" : ""} : ${r.foods.map((f) => `${one(f.name)} ${f.grams} g`).join(", ") || "–"}`)); });
+    const nut = Data.nutrition(); const tg = (t) => MACROS.filter(([k]) => t && t[k] != null).map(([k, lab]) => `${t[k]} ${lab.replace("prot. g", "g P").replace("gluc. g", "g G").replace("lip. g", "g L")}`).join(" · ");
+    L.push("", "## Alimentation", "", `Plan actuel : v${nut.version} · phase ${phaseLabel(nut, nut.phase)} · cibles ${tg(nut.targets)}. Macros des plats estimées à partir des ingrédients.`, "", "### Versions du plan");
+    const nv = Store.list("nutritionVersions").map((x) => x.data).sort((a, b) => (a.version || 0) - (b.version || 0));
+    nv.forEach((v) => L.push(`- v${v.version ?? "?"} — ${(v.savedAt || "?").slice(0, 10)}${v.phase ? ` — phase ${phaseLabel(v, v.phase)}` : ""}${v.targets ? ` — ${tg(v.targets)}` : ""}${v.reason ? ` — ${one(v.reason)}` : ""}`));
+    if (!nv.length) L.push("Aucune version archivée.");
+    L.push("", "### Journal (une ligne par jour enregistré : cumul des repas cochés / cible du jour, puis chaque repas)");
+    nutLogs.forEach((l) => { const d = nutDay(l); const t = d.targets || {}; const vs = (k) => `${Math.round(d.tot[k])}${t[k] != null ? "/" + t[k] : ""}`;
+      L.push(`- ${l.date} (${phaseLabel(nut, d.phase)}${l.planVersion != null ? `, plan v${l.planVersion}` : ", ancien plan"}) : ${vs("kcal")} kcal · P ${vs("protein")} g · G ${vs("carbs")} g · L ${vs("fat")} g · ${d.eaten.length}/${d.planned} repas`);
+      Object.keys(l.meals || {}).forEach((id) => { const m = l.meals[id]; if (!m) return; L.push(`  - ${m.eaten ? "✓" : "✗"} ${id}${m.name && m.name.toLowerCase() !== id ? ` : ${one(m.name)}` : ""}${m.eaten ? ` (${macroLine(mealMacros(m))})` : " — décoché"}${m.blocks && m.blocksChanged ? ` · blocs ${m.blocks.protein} + ${m.blocks.starch}` : ""}`); }); });
     if (!nutLogs.length) L.push("Aucun jour enregistré.");
+    const weeks = Store.list("nutritionWeeks").map((x) => x.data);
+    if (weeks.length) { L.push("", "### Courses et batch par semaine"); weeks.forEach((w) => { const st = window.ShredStock.shoppingState(nut, w); const bd = Object.values((w.batch && w.batch.done) || {}).filter(Boolean).length; L.push(`- semaine du ${w.weekStart} : courses ${st.done}/${st.total}${bd ? ` · batch ${bd}/${((nut.batch || {}).steps || []).length}` : ""}${w.order && w.order.join() !== "1,2,3,4,5,6,7" ? ` · ordre des jours ${w.order.join("-")}` : ""}`); }); }
 
     L.push("", "## Photos", "", "Références seulement (les images ne sont pas dans ce fichier).");
     photos.forEach((ph) => L.push(`- ${ph.date}${ph.note ? ` — ${one(ph.note)}` : ""}`, ...PHOTO_SLOTS.filter(([k]) => ph[k]).map(([k, lab]) => `  - ${lab} : ${photoUrl(ph[k])}`)));
@@ -847,12 +900,12 @@
       <textarea id="imp-json" placeholder='{"name": "...", "days": [...]}'></textarea>
       <input type="text" id="imp-reason" placeholder="Motif (ex. : bilan semaine 4, +2,5 kg développé)" style="margin-top:8px">
       <div class="btnrow" style="margin-top:8px"><button class="btn primary" data-act="imp-program">Importer comme nouvelle version</button><button class="btn ghost" data-act="exp-program">Copier le programme actuel</button></div>
-      <p class="tiny faint" style="margin-top:8px">Un JSON contenant <code>meals</code> et <code>targets</code> est importé comme plan nutrition ; un JSON avec <code>items</code> et <code>moments</code> comme plan de compléments ; un JSON de sauvegarde complète restaure tout.</p></div>`;
+      <p class="tiny faint" style="margin-top:8px">Un JSON contenant <code>week</code>, <code>dishes</code> et <code>targets</code> est importé comme nouvelle version du plan alimentaire ; un JSON avec <code>items</code> et <code>moments</code> comme plan de compléments ; un JSON de sauvegarde complète restaure tout.</p></div>`;
   }
   function importJSON(text, reason) {
     let o; try { o = JSON.parse(text); } catch (e) { return toast("JSON invalide"); }
     if (o.docs && o.shredlogBackup) { Object.entries(o.docs).forEach(([k, v]) => Store.set(k, v)); toast("Sauvegarde restaurée"); return; }
-    if (o.meals && o.targets) { o.version = (Data.nutrition().version || 0) + 1; Store.set("nutrition/plan", o); toast("Plan nutrition importé"); return; }
+    if (o.week && o.dishes && o.targets) { saveNutritionPlan(o, reason || "Import manuel"); toast("Plan alimentaire importé (nouvelle version)"); return; }
     if (o.items && o.moments) { Store.set("supplements/plan", o); toast("Plan compléments importé"); return; }
     if (!Array.isArray(o.days)) return toast("Structure inconnue : il faut « days »");
     const cur = Data.program(); const v = (cur ? cur.version : 0) + 1;
@@ -918,7 +971,7 @@
     ${pushCard()}
     <div class="card"><h3>Sur iPhone</h3><p class="small muted" style="margin-top:6px">Safari → Partager → « Sur l'écran d'accueil ». L'app s'ouvre en plein écran, fonctionne hors ligne et synchronise dès que le réseau revient.</p></div>
     <div class="card"><h3>Connexion IA</h3><p class="small muted" style="margin-top:6px">Claude / Codex lisent et écrivent directement dans la base de cet artifact (collections : sessions, measurements, photos, supplementLogs, nutritionLogs, program, programVersions, reviews, nutrition, supplements). Le guide du schéma est dans la collection <code>meta/guide</code>.</p></div>
-    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 19 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
+    <div class="card"><h3>Diagnostic</h3><p class="tiny muted" style="margin-top:6px">Build 20 · ${Store.db ? "base connectée" : "base non connectée"} · ${Store.pending.size} en attente · écran ${window.innerWidth}×${window.innerHeight}${UI.lastError ? " · dernière erreur : " + esc(UI.lastError) : ""}</p></div>
     <div class="card"><h3>Données</h3><div class="stack" style="margin-top:8px"><button class="btn ghost" data-act="resync">Forcer la synchronisation</button><button class="btn danger" data-act="reset-local">Vider le cache local (les données restent dans la base)</button></div></div>`;
   }
   function renderMore() {
@@ -1015,17 +1068,17 @@
       case "stock-edit": { const l = Data.stockLines().find((x) => x.id === id); if (!l) break; const lab = (UNIT_LABEL[l.unit] || [l.unit, l.unit])[1];
         sheet(`<h3>Réglages — ${esc(l.name)}</h3><p class="tiny muted" style="margin-top:4px">Unité : ${esc(lab)}. La dose est la consommation totale par jour, toutes prises confondues.</p><div class="grid2" style="margin-top:10px">${[["dosePerDay", `Dose / jour (${lab})`], ["unitsPerBox", `Par boîte (${lab})`], ["leadTimeDays", "Délai de livraison (j)"], ["bufferDays", "Marge de sécurité (j)"]].map(([k, t]) => `<div class="field"><label>${t}</label><input type="number" inputmode="decimal" step="any" min="0" id="stk-${k}" value="${l[k]}"></div>`).join("")}</div><button class="btn primary wide" style="margin-top:12px" data-act="stock-edit-save" data-id="${l.id}">Enregistrer</button>`); break; }
       case "stock-edit-save": { const l = Data.stockLines().find((x) => x.id === id); if (!l) break; for (const k of ["dosePerDay", "unitsPerBox", "leadTimeDays", "bufferDays"]) { const v = num($("#stk-" + k).value); if (v == null || v < 0 || (k === "dosePerDay" && v === 0)) return toast("Valeur invalide"); l[k] = v; } Data.saveStock(l); closeSheet(); toast("Réglages enregistrés"); break; }
-      case "meal-eaten": { const date = UI.nutDate; const log = Store.get("nutritionLogs/" + date) || { date, meals: {} }; log.meals = log.meals || {}; log.meals[id] = log.meals[id] || {}; log.meals[id].eaten = !log.meals[id].eaten; Store.set("nutritionLogs/" + date, log); render(); break; }
-      case "meal-edit": mealEditSheet(id); break;
-      case "food-del": UI.editFoods.splice(+b.dataset.i, 1); mealEditSheetRefresh(); break;
-      case "food-add": { const f = { name: $("#nf-name").value.trim(), grams: num($("#nf-g").value) || 0, kcal: num($("#nf-kcal").value) || 0, protein: num($("#nf-p").value) || 0, carbs: num($("#nf-c").value) || 0, fat: num($("#nf-f").value) || 0 }; if (!f.name) return toast("Nom manquant"); UI.editFoods.push(f); mealEditSheetRefresh(); break; }
-      case "meal-save": { const date = UI.nutDate; const log = Store.get("nutritionLogs/" + date) || { date, meals: {} }; log.meals = log.meals || {}; log.meals[UI.editMeal] = { ...(log.meals[UI.editMeal] || {}), foods: clone(UI.editFoods), eaten: true }; Store.set("nutritionLogs/" + date, log); closeSheet(); render(); toast("Repas enregistré"); break; }
-      case "meal-save-plan": { const plan = clone(Data.nutrition()); const m = plan.meals.find((x) => x.id === UI.editMeal); m.foods = clone(UI.editFoods); Store.set("nutrition/plan", plan); closeSheet(); render(); toast("Plan mis à jour"); break; }
-      case "meal-reset": { const date = UI.nutDate; const log = Store.get("nutritionLogs/" + date); if (log && log.meals && log.meals[UI.editMeal]) { delete log.meals[UI.editMeal].foods; Store.set("nutritionLogs/" + date, log); } closeSheet(); render(); break; }
-      case "nut-targets": { const t = Data.nutrition().targets; sheet(`<h3>Objectifs journaliers</h3><div class="grid2" style="margin-top:10px">${[["kcal", "kcal"], ["protein", "Protéines (g)"], ["carbs", "Glucides (g)"], ["fat", "Lipides (g)"]].map(([k, l]) => `<div class="field"><label>${l}</label><input type="number" id="t-${k}" value="${t[k]}"></div>`).join("")}</div><button class="btn primary wide" style="margin-top:12px" data-act="nut-targets-save">Enregistrer</button>`); break; }
-      case "nut-targets-save": { const plan = clone(Data.nutrition()); ["kcal", "protein", "carbs", "fat"].forEach((k) => (plan.targets[k] = num($("#t-" + k).value) || 0)); Store.set("nutrition/plan", plan); closeSheet(); render(); break; }
-      case "nut-add-meal": sheet(`<h3>Nouveau repas</h3><div class="grid2" style="margin-top:10px"><input type="text" id="nm-name" placeholder="Nom (ex. Dîner)"><input type="time" id="nm-time"></div><button class="btn primary wide" style="margin-top:12px" data-act="nut-add-meal-save">Ajouter</button>`); break;
-      case "nut-add-meal-save": { const name = $("#nm-name").value.trim(); if (!name) return toast("Nom manquant"); const plan = clone(Data.nutrition()); plan.meals.push({ id: "m" + uid(), name, time: $("#nm-time").value || "", foods: [] }); Store.set("nutrition/plan", plan); closeSheet(); render(); break; }
+      case "nut-tab": UI.nutTab = b.dataset.v; if (location.hash.includes("?")) history.replaceState(null, "", "#nutrition"); render(); break;
+      case "meal-eaten": { // la case copie dans le journal ce qui est mangé (nom, macros, aliments) + la phase et les cibles du jour
+        const date = UI.nutDate; const plan = Data.nutrition(); const p = plannedMeals(date).find((x) => x.slot === id); if (!p) break;
+        const log = Store.get("nutritionLogs/" + date) || { date, meals: {} }; log.meals = log.meals || {}; const was = log.meals[id] && log.meals[id].eaten;
+        log.meals[id] = was ? { ...log.meals[id], eaten: false } : { eaten: true, at: new Date().toISOString(), name: p.name, macros: clone(p.macros), ...(p.dishId ? { dishId: p.dishId, blocks: clone(p.blocks) } : { foods: clone(p.foods || []) }) };
+        log.planVersion = plan.version; log.phase = plan.phase; log.targets = clone(plan.targets);
+        Store.set("nutritionLogs/" + date, log); render(); break; }
+      case "shop-toggle": case "shop-reset": { const plan = Data.nutrition(); const { key, doc } = shoppingWeek(); const w = clone(doc); w.weekStart = key; w.planVersion = plan.version;
+        const checked = act === "shop-reset" ? {} : { ...((w.shopping && w.shopping.checked) || {}) }; if (act === "shop-toggle") { if (checked[id]) delete checked[id]; else checked[id] = true; }
+        w.shopping = { checked }; w.shopping.doneAt = window.ShredStock.shoppingState(plan, w).left.length ? null : new Date().toISOString();
+        Store.set("nutritionWeeks/" + key, w); render(); break; }
       case "review-seen": { const r = Store.get("reviews/" + id); if (r) { r.seen = true; Store.set("reviews/" + id, r); } render(); break; }
       case "exp-xlsx": exportXLSX(); break;
       case "exp-csv": { const w = b.dataset.w; const rows = { sessions: sessionRows(), measures: measureRows(), supps: suppRows(), nutrition: nutritionRows() }[w]; if (!rows.length) return toast("Aucune donnée"); download(`shredlog_${w}_${isoDate()}.csv`, "﻿" + toCSV(rows), "text/csv"); break; }
@@ -1051,7 +1104,6 @@
       case "reset-local": ask("Vider le cache local ?", "Les données non encore synchronisées seraient perdues.", "Vider", () => { localStorage.removeItem("shredlog.docs"); localStorage.removeItem("shredlog.pending"); location.reload(); }, true); break;
     }
   });
-  function mealEditSheetRefresh() { mealEditSheet(UI.editMeal, UI.editFoods); }
   async function copyText(t) { try { await navigator.clipboard.writeText(t); toast("Copié dans le presse-papiers"); } catch (e) { sheet(`<h3>Copie manuelle</h3><textarea style="min-height:50vh;margin-top:8px">${esc(t)}</textarea>`); } }
 
   // Saisies (inputs)
@@ -1063,7 +1115,6 @@
     else if (bind === "note" && s) { s.exercises[s.cursor].note = el.value; saveSessionDebounced(s); }
     else if (bind === "session-note") { const x = Store.get("sessions/" + el.dataset.id); if (x) { x.note = el.value; saveSessionDebounced(x); } }
     else if (bind.startsWith("prog-")) { const p = Data.program(); p.days.forEach((d) => d.exercises.forEach((e) => { if (e.id !== el.dataset.ex) return; if (bind === "prog-sets") e.sets = Math.max(1, num(el.value) || 1); else if (bind === "prog-reps") e.reps = el.value; else { const v = e[el.dataset.vk]; if (!v) return; if (bind === "prog-kg") { v.kg = num(el.value); v.lbs = toLbs(v.kg); const o = $(`input[data-bind="prog-lbs"][data-ex="${e.id}"][data-vk="${el.dataset.vk}"]`); if (o) o.value = v.lbs ?? ""; } else { v.lbs = num(el.value); v.kg = toKg(v.lbs); const o = $(`input[data-bind="prog-kg"][data-ex="${e.id}"][data-vk="${el.dataset.vk}"]`); if (o) o.value = v.kg ?? ""; } } })); debounce("prog", () => Store.set("program/current", p)); }
-    else if (bind === "food-g") { const f = UI.editFoods[+el.dataset.i]; const g = num(el.value) || 0; const r = f.grams ? g / f.grams : 0; ["kcal", "protein", "carbs", "fat"].forEach((k) => (f[k] = Math.round(f[k] * r * 10) / 10)); f.grams = g; }
     else if (bind === "p-note") { const date = UI.pDate || isoDate(); const doc = Data.photoDoc(date) || { date }; doc.note = el.value; debounce("pnote", () => Store.set("photos/" + date, doc)); }
     else if (bind === "set-name" || bind === "set-height") { const st = Data.settings(); if (bind === "set-name") st.name = el.value; else st.heightCm = num(el.value) || 172; debounce("settings", () => Data.saveSettings(st)); }
   });
@@ -1104,7 +1155,7 @@
   Store.onChange(() => { if (UI.view !== "session" || !activeSession()) render(); else { $("#more-dot").classList.toggle("hidden", Data.unseenReviews() === 0); } Store.updateBanner(); });
   route();
   Store.updateBanner();
-  const GUIDE = { version: 4, purpose: "Schéma de la base Shredlog pour une IA", collections: { "program/current": "programme actif (specId shredlog-spec-v2) : days[] {id, weekday 0=dim, name, focus, duration, rest, slot, kind (\"neck\" pour le bloc cou + trapèzes : déclenche la notification du mercredi 07h30 s'il est prévu weekday 3), exercises[] {id, block, sets, reps, rest, tempo \"2-1-1\" (cou \"3-1-3\"), orig (nom dans le programme d'origine : les 45 exercices doivent rester présents), info, primary, machine{ex,kg,lbs,note,tab}, dumbbell{...}}}. ex = clé de la bibliothèque (voir data.js) ou custom{name,cues}", "programVersions/vN": "copie de chaque version + savedAt + reason", "sessions/<date>_<dayId>": "séance : status in_progress|done|abandoned, exercises[] {id, variant, targetSets, doneSets, sets[]{kg,lbs,reps,done}, difficulty facile|moyen|difficile, pain, note, skipped}", "measurements/<date>": "poids kg, tours en cm (waistRelaxed, neck, chest, armR...), bodyFat %", "photos/<date>": "face / profilG (profil gauche) / profilD (profil droit) / dos → {id,url,at}, + note. L'ancien champ profil = profilG", "supplementLogs/<date>": "taken{itemId:true}", "nutritionLogs/<date>": "meals{mealId:{eaten, foods[]}}", "nutrition/plan": "targets{kcal,protein,carbs,fat}, meals[]{id,name,time,foods[]{name,grams,kcal,protein,carbs,fat}}", "supplements/plan": "moments[], items[]{id,name,brand,dose,moment,why,cycle,fat, cycleStart,weeksOn,weeksOff,cycleEnabled}", "stock/<id>": "une ligne par boîte réelle : {name, brand, unit capsule|softgel|gramme|ml, unitsLeft (au comptage), lastCountedAt, countExclude[] (cases déjà cochées au comptage), countEffectiveFrom (1er jour décompté si des doses sont déjà sorties des boîtes — pilulier ; null sinon), unitsPerBox, dosePerDay, leadTimeDays, bufferDays, orderedAt (null = pas commandé), supplier, takes[]{item, qty} (cases supplementLogs qui la consomment), food (regex d'aliment Nutrition, whey)}. Le restant réel = unitsLeft − prises cochées depuis max(lastCountedAt, countEffectiveFrom) (jours OFF exclus), calcul dans stock.js. Oméga-3 = UNE seule ligne (omega1 + omega2).", "meta/migrations": "bascules faites une seule fois (programSpecV2, build18, shrugsJ6 : date) — ne pas supprimer", "reviews/<id>": "bilan IA : {date, title, summary, changes[]{what,from,to,why}, programVersionFrom, programVersionTo, appliesFrom, seen:false} → l'app affiche une pastille tant que seen=false" }, howToAdjust: "1) lire sessions + measurements ; 2) écrire programVersions/v(N+1) = copie modifiée ; 3) écrire program/current avec version N+1 ; 4) écrire reviews/<date> avec seen:false et la liste des changements. Ne jamais augmenter une charge si pain=true sur l'exercice." };
+  const GUIDE = { version: 5, purpose: "Schéma de la base Shredlog pour une IA", collections: { "program/current": "programme actif (specId shredlog-spec-v2) : days[] {id, weekday 0=dim, name, focus, duration, rest, slot, kind (\"neck\" pour le bloc cou + trapèzes : déclenche la notification du mercredi 07h30 s'il est prévu weekday 3), exercises[] {id, block, sets, reps, rest, tempo \"2-1-1\" (cou \"3-1-3\"), orig (nom dans le programme d'origine : les 45 exercices doivent rester présents), info, primary, machine{ex,kg,lbs,note,tab}, dumbbell{...}}}. ex = clé de la bibliothèque (voir data.js) ou custom{name,cues}", "programVersions/vN": "copie de chaque version + savedAt + reason", "sessions/<date>_<dayId>": "séance : status in_progress|done|abandoned, exercises[] {id, variant, targetSets, doneSets, sets[]{kg,lbs,reps,done}, difficulty facile|moyen|difficile, pain, note, skipped}", "measurements/<date>": "poids kg, tours en cm (waistRelaxed, neck, chest, armR...), bodyFat %", "photos/<date>": "face / profilG (profil gauche) / profilD (profil droit) / dos → {id,url,at}, + note. L'ancien champ profil = profilG", "supplementLogs/<date>": "taken{itemId:true}", "nutrition/plan": "plan alimentaire courant, écrit par l'IA (l'app ne décide jamais de la phase) : {version, savedAt, reason, phase (deficit|surplus), targets{kcal,protein,carbs,fat} = cibles ACTIVES, phases{id:{label,targets,until|note}} (référence), plate{rule, perMeal, protein[]{id,name,portion,protein,fat}, starch[]{id,name,portion,carbs}}, fixed[]{id (matin|shake), name, content, note, macros, foods[]{name,grams}}, dishes{id:{name, slot midi|soir, blocks{protein,starch}, ingredients[]{name,qty,unit}, sauce, macros{kcal,protein,carbs,fat}, macrosEstimated}}, week[]{weekday 1=lundi…7=dimanche, midi: dishId, soir: dishId}, shopping{groups{id:{name,priceTHB}}, items[]{id,name,qty,priceTHB?,aisle,group?}, totalTHB}, batch{weekday, minutes, steps[]{id,title,detail}}}. Pour changer de phase ou de plat : écrire nutritionVersions/v(N+1) puis nutrition/plan avec version N+1 (+ reviews/<date> seen:false)", "nutritionVersions/vN": "copie intégrale de chaque version du plan + savedAt + reason", "nutritionLogs/<date>": "journal du jour, autonome (copie de ce qui a été mangé) : {date, planVersion, phase, targets (cibles du jour), meals{matin|shake|midi|soir:{eaten, at, name, macros, dishId?, blocks?, foods?[]{name,grams}}}}. Observance = repas eaten / 4 et cumul des macros / targets. Anciens journaux : meals{m1..:{eaten, foods[]}}", "nutritionWeeks/<lundi>": "état de la semaine : {weekStart, planVersion, order[7] (jour de la semaine type servi chaque jour, si échange), shopping{checked{itemId:true}, doneAt}, batch{done{stepId:true}}}. Le dimanche, courses et batch visent la semaine qui commence le lendemain", "supplements/plan": "moments[], items[]{id,name,brand,dose,moment,why,cycle,fat, cycleStart,weeksOn,weeksOff,cycleEnabled}", "stock/<id>": "une ligne par boîte réelle : {name, brand, unit capsule|softgel|gramme|ml, unitsLeft (au comptage), lastCountedAt, countExclude[] (cases déjà cochées au comptage), countEffectiveFrom (1er jour décompté si des doses sont déjà sorties des boîtes — pilulier ; null sinon), unitsPerBox, dosePerDay, leadTimeDays, bufferDays, orderedAt (null = pas commandé), supplier, takes[]{item, qty} (cases supplementLogs qui la consomment), food (regex d'aliment : whey, lue dans les repas cochés de nutritionLogs)}. Le restant réel = unitsLeft − prises cochées depuis max(lastCountedAt, countEffectiveFrom) (jours OFF exclus), calcul dans stock.js. Oméga-3 = UNE seule ligne (omega1 + omega2).", "meta/migrations": "bascules faites une seule fois (programSpecV2, build18, shrugsJ6, nutritionPlan1 : date) — ne pas supprimer", "reviews/<id>": "bilan IA : {date, title, summary, changes[]{what,from,to,why}, programVersionFrom, programVersionTo, appliesFrom, seen:false} → l'app affiche une pastille tant que seen=false" }, howToAdjust: "1) lire sessions + measurements ; 2) écrire programVersions/v(N+1) = copie modifiée ; 3) écrire program/current avec version N+1 ; 4) écrire reviews/<date> avec seen:false et la liste des changements. Ne jamais augmenter une charge si pain=true sur l'exercice." };
   // Après connexion à la base : état initial du stock (CSV du 27/09) et guide du schéma.
   // Jamais avant la connexion, sinon un appareil neuf écraserait le stock réel avec l'état initial.
   async function afterConnect() {
@@ -1113,6 +1164,7 @@
     await migrateProgram();
     await migrateBuild18();
     await migrateShrugsJ6();
+    await migrateNutrition();
     const g = Store.get("meta/guide"); if (!g || g.version !== GUIDE.version) Store.set("meta/guide", GUIDE);
   }
   // Programme spec v2 (chantier 4) — une seule fois (marqueur meta/migrations), après lecture réussie de la base :
@@ -1196,6 +1248,30 @@
       });
     }
     Store.set("meta/migrations", { ...(Store.get("meta/migrations") || {}), shrugsJ6: today });
+  }
+  // Nouvelle version du plan alimentaire : copie dans nutritionVersions/v<N> puis nutrition/plan (même logique que le programme).
+  function saveNutritionPlan(plan, reason) {
+    const cur = Store.get("nutrition/plan"); const known = Store.list("nutritionVersions").map((x) => Number(x.data.version) || Number(x.id.slice(1)) || 0);
+    const nv = Math.max(0, Number(cur && cur.version) || 0, ...known) + 1; const p = { ...clone(plan), version: nv, savedAt: new Date().toISOString(), reason: reason || plan.reason || "" };
+    Store.set("nutritionVersions/v" + nv, p); Store.set("nutrition/plan", p); return p;
+  }
+  // Programme alimentaire (11/10/2026) — une seule fois, après lecture réussie de la base : l'ancien plan provisoire est
+  // archivé, ses journaux reçoivent la copie de leurs aliments (la whey déjà bue reste décomptée), le plan initial devient
+  // la version suivante, et la whey passe à 32 g/jour (1 mesurette). Un plan déjà au nouveau format n'est pas remplacé.
+  async function migrateNutrition() {
+    try { await Promise.all(["nutrition", "nutritionVersions", "nutritionLogs", "stock", "meta"].map((c) => Store.db.collection(c).get())); } catch (e) { console.warn("plan alimentaire : lecture impossible, pas de bascule", e); return; }
+    const mig = Store.get("meta/migrations") || {}; if (mig.nutritionPlan1) return;
+    const LEGACY = [{ id: "m1", name: "Snack protéiné midi", foods: [{ name: "Whey ISO100", grams: 30, kcal: 110, protein: 25, carbs: 1, fat: 0.5 }, { name: "Amandes", grams: 20, kcal: 116, protein: 4, carbs: 4, fat: 10 }] }, { id: "m2", name: "Post-séance", foods: [{ name: "Whey ISO100", grams: 30, kcal: 110, protein: 25, carbs: 1, fat: 0.5 }] }, { id: "m3", name: "Dîner", foods: [] }];
+    const old = Store.get("nutrition/plan"); const isNew = !!(old && old.week && old.dishes); const oldMeals = (old && old.meals) || LEGACY;
+    Store.list("nutritionLogs").forEach((x) => { const l = clone(x.data); let changed = false;
+      Object.keys(l.meals || {}).forEach((id) => { const m = l.meals[id]; const pm = oldMeals.find((o) => o.id === id); if (m && pm && !m.foods && !m.macros) { m.foods = clone(pm.foods || []); m.name = m.name || pm.name; changed = true; } });
+      if (changed) Store.set(x.path, l); });
+    if (!isNew) {
+      if (old && !Store.get("nutritionVersions/v" + (old.version || 0))) Store.set("nutritionVersions/v" + (old.version || 0), { ...clone(old), version: old.version || 0, savedAt: new Date().toISOString(), reason: "Ancien plan provisoire (avant le programme alimentaire)" });
+      saveNutritionPlan(D.NUTRITION, D.NUTRITION.reason);
+    }
+    const whey = Data.stockLines().find((l) => l.id === "whey"); if (whey && whey.dosePerDay === 60) Data.saveStock({ ...whey, dosePerDay: 32 });
+    Store.set("meta/migrations", { ...(Store.get("meta/migrations") || {}), nutritionPlan1: isoDate() });
   }
   Store.connect().then(afterConnect);
   window.Shredlog = { Store, Data, UI, render };

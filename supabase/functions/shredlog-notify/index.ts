@@ -44,7 +44,7 @@ async function loadDocs(db, uid, today) {
     q((x) => x.eq("collection", "supplementLogs").gte("path", "supplementLogs/" + from)),
     q((x) => x.eq("collection", "nutritionLogs").gte("path", "nutritionLogs/" + from)),
     q((x) => x.eq("collection", "sessions").like("path", `sessions/${today}%`)),
-    q((x) => x.in("path", ["measurements/" + today, "photos/" + today])),
+    q((x) => x.in("path", ["measurements/" + today, "photos/" + today, "nutritionWeeks/" + S.prepWeek(today)])),
   ]);
   logs.flat().forEach((r) => (docs[r.path] = r.data));
   return docs;

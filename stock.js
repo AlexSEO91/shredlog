@@ -44,10 +44,14 @@
     const sl = ctx.supLog(date); const taken = (sl && sl.taken) || {};
     (line.takes || []).forEach((t) => { if (taken[t.item] && !ex.includes(t.item) && isOn(ctx.cycleOf(t.item), date)) q += t.qty; });
     if (line.food) {
+      // Repas cochés du journal : les aliments sont ceux copiés dans le journal (l.foods), sinon ceux du plan
+      // (plan.fixed = matin / shake ; plan.meals = ancien format).
       const re = new RegExp(line.food, "i"); const nl = ctx.nutLog(date); const meals = (nl && nl.meals) || {};
-      ((ctx.nutPlan && ctx.nutPlan.meals) || []).forEach((m) => {
-        const l = meals[m.id]; if (!l || !l.eaten || ex.includes("meal:" + m.id)) return;
-        (l.foods || m.foods || []).forEach((f) => { if (re.test(f.name || "")) q += Number(f.grams) || 0; });
+      const plan = ctx.nutPlan || {}; const planned = (plan.fixed || []).concat(plan.meals || []);
+      Object.keys(meals).forEach((id) => {
+        const l = meals[id]; if (!l || !l.eaten || ex.includes("meal:" + id)) return;
+        const m = planned.find((x) => x.id === id);
+        (l.foods || (m && m.foods) || []).forEach((f) => { if (re.test(f.name || "")) q += Number(f.grams) || 0; });
       });
     }
     return q;
@@ -132,7 +136,18 @@
     return null;
   }
 
-  const api = { isOn, cycleInfo, dayUse, countFrom, status, recount, countable, orderGroup, nextRecount, addDays, diffDays };
+  /* Semaine alimentaire (nutritionWeeks/<lundi>). mealWeek : lundi de la semaine de la date (dimanche = 7e jour).
+     prepWeek : semaine que l'on prépare — le dimanche, courses et batch visent la semaine qui commence le lendemain. */
+  const mealWeek = (date) => addDays(date, -((parse(date).getUTCDay() + 6) % 7));
+  const prepWeek = (date) => (parse(date).getUTCDay() === 0 ? addDays(date, 1) : mealWeek(date));
+  /* Liste de courses d'une semaine : { total, done, left[] } à partir du plan et du document de la semaine. */
+  function shoppingState(plan, week) {
+    const items = (plan && plan.shopping && plan.shopping.items) || []; const checked = (week && week.shopping && week.shopping.checked) || {};
+    const left = items.filter((i) => !checked[i.id]);
+    return { total: items.length, done: items.length - left.length, left };
+  }
+
+  const api = { mealWeek, prepWeek, shoppingState, isOn, cycleInfo, dayUse, countFrom, status, recount, countable, orderGroup, nextRecount, addDays, diffDays };
   root.ShredStock = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

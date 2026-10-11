@@ -2,15 +2,19 @@
 const fs = require("fs"); const path = require("path");
 const ROOT = path.join(__dirname, "..");
 global.window = {}; eval(fs.readFileSync(path.join(ROOT, "data.js"), "utf8"));
-const D = window.SHRED_DATA; const S = require(path.join(ROOT, "stock.js"));
-const N = require(path.join(ROOT, "supabase/functions/shredlog-notify/notify.js"));
+const FULL = window.SHRED_DATA; // data.js complet : sert de jeu d'essai (programme, cases des compléments)
+// SHRED_BUNDLE=<fichier .ts déployé> : les mêmes contrôles tournent sur le calcul embarqué dans ce fichier
+// (données réduites + stock.js + notify.js), voir tools/check_edge_min.js.
+const BUNDLE = process.env.SHRED_BUNDLE ? require("./edge_bundle.js").load(process.env.SHRED_BUNDLE) : null;
+const D = BUNDLE ? BUNDLE.D : FULL; const S = BUNDLE ? BUNDLE.S : require(path.join(ROOT, "stock.js"));
+const N = BUNDLE ? BUNDLE.N : require(path.join(ROOT, "supabase/functions/shredlog-notify/notify.js"));
 // Scénarios datés du 27/09 : décompte depuis le comptage, sans la semaine de pilulier du 12/10 (contrôlée dans check_stock.js).
 D.STOCK.forEach((l) => (l.countEffectiveFrom = null));
 
 let fails = 0; const ok = (cond, msg, extra) => { if (!cond) { fails++; console.log("  ✗ " + msg + (extra ? "\n      → " + JSON.stringify(extra) : "")); } };
 const clone = (o) => JSON.parse(JSON.stringify(o));
-const PROGRAM = clone(D.PROGRAM);
-const itemIds = D.SUPPLEMENTS.items.map((i) => i.id);
+const PROGRAM = clone(FULL.PROGRAM);
+const itemIds = FULL.SUPPLEMENTS.items.map((i) => i.id);
 // Journal : toutes les cases cochées chaque jour du 27/09 à la veille de `until` (le jour même : rien de coché le matin).
 function docsUntil(until, extra = {}) {
   const docs = { "program/current": PROGRAM, ...extra };
@@ -56,9 +60,9 @@ const calm = { "program/current": PROGRAM }; ["probio", "collagen", "omega3"].fo
 r = run("morning", "2026-09-27", calm);
 ok(!r.messages.some((m) => m.tag === "stock"), "seuils seulement à venir (créatine demain) → rien tant qu'aucun seuil n'est atteint", body(r));
 // Fournisseurs séparés : la whey (Central) n'entre pas dans une commande iHerb
-const wheyNear = docsUntil("2026-09-27", { "stock/whey": { ...D.STOCK.find((l) => l.id === "whey"), unitsLeft: 700 } });
+const wheyNear = docsUntil("2026-09-27", { "stock/whey": { ...D.STOCK.find((l) => l.id === "whey"), unitsLeft: 360 } });
 r = run("morning", "2026-09-27", wheyNear);
-ok(S.status({ ...D.STOCK.find((l) => l.id === "whey"), unitsLeft: 700 }, "2026-09-27", { supLog: () => null, nutLog: () => null, nutPlan: D.NUTRITION, cycleOf: () => null }).alertDate === "2026-09-30", "whey à 700 g : seuil le 30/09 (dans les 7 jours)");
+ok(S.status({ ...D.STOCK.find((l) => l.id === "whey"), unitsLeft: 360 }, "2026-09-27", { supLog: () => null, nutLog: () => null, nutPlan: D.NUTRITION, cycleOf: () => null }).alertDate === "2026-09-30", "whey à 360 g (32 g/j) : seuil le 30/09 (dans les 7 jours)");
 ok(!/Whey/.test(body(r)), "… mais pas ajoutée à la commande iHerb", body(r));
 const ordered = docsUntil("2026-10-04"); ["collagen", "omega3", "creatine", "rhodiola"].forEach((id) => (ordered["stock/" + id] = { ...D.STOCK.find((l) => l.id === id), orderedAt: "2026-10-02" }));
 ok(!run("morning", "2026-10-04", ordered, logs).messages.some((m) => m.tag === "stock"), "tout marqué « recommandé » → plus de rappel");
@@ -104,12 +108,24 @@ ok(!run("evening", "2026-09-30", { "program/current": { days: [withNeck.days[wit
 
 console.log("7. Dimanche 10h : mensurations + photos (2 notifications) · dimanche 21h : recomptage mensuel");
 r = run("measures", "2026-10-04");
-ok(r.messages.map((m) => m.tag).join() === "measures,photos", "dimanche 10h : deux notifications distinctes, mensurations puis photos", body(r));
+ok(r.messages.map((m) => m.tag).join() === "measures,photos,courses", "dimanche 10h : trois notifications distinctes, mensurations, photos, courses + batch", body(r));
+ok(r.messages[2].title === "Courses + batch" && r.messages[2].url === "#nutrition?courses" && /^24 articles à cocher/.test(r.messages[2].body), "courses : titre, lien, nombre d'articles restants", r.messages[2]);
+{ // Liste de la semaine qui commence le lendemain (lundi 05/10)
+  const all = Object.fromEntries(D.NUTRITION.shopping.items.map((i) => [i.id, true])); const tags = (extra) => run("measures", "2026-10-04", docsUntil("2026-10-04", extra)).messages.map((m) => m.tag).join();
+  ok(S.prepWeek("2026-10-04") === "2026-10-05" && S.prepWeek("2026-10-05") === "2026-10-05" && S.prepWeek("2026-10-10") === "2026-10-05" && S.prepWeek("2026-10-11") === "2026-10-12", "semaine préparée : bascule le dimanche à 0h00 sur le lundi suivant");
+  ok(S.mealWeek("2026-10-11") === "2026-10-05" && S.mealWeek("2026-10-12") === "2026-10-12", "semaine des repas : lundi → dimanche");
+  ok(tags({ "nutritionWeeks/2026-10-05": { shopping: { checked: all } } }) === "measures,photos", "liste entièrement cochée → pas de rappel courses");
+  const partial = { ...all }; delete partial.riz;
+  ok(tags({ "nutritionWeeks/2026-10-05": { shopping: { checked: partial } } }) === "measures,photos,courses", "un article non coché → rappel courses");
+  ok(tags({ "nutritionWeeks/2026-09-28": { shopping: { checked: all } } }) === "measures,photos,courses", "liste cochée la semaine d'avant → rappel pour la nouvelle semaine");
+  ok(tags({ "nutrition/plan": { version: 0, targets: {}, meals: [] } }) === "measures,photos,courses", "ancien plan en base → liste du plan par défaut");
+  ok(tags({ "measurements/2026-10-04": { weight: 70 }, "photos/2026-10-04": { face: { id: "x" } }, "nutritionWeeks/2026-10-05": { shopping: { checked: partial } } }) === "courses", "les trois rappels disparaissent séparément");
+}
 ok(r.messages[0].url === "#track" && r.messages[1].url === "#track?photos" && !/photo/i.test(r.messages[0].body), "liens : Suivi et onglet Photos ; le rappel mensurations ne parle plus des photos");
-ok(r.logKeys.join() === "measures:2026-10-04,photos:2026-10-04", "journal : une clé par notification", r.logKeys);
-ok(run("measures", "2026-10-04", docsUntil("2026-10-04", { "measurements/2026-10-04": { weight: 70 } })).messages.map((m) => m.tag).join() === "photos", "mensurations déjà saisies → photos seules");
-ok(run("measures", "2026-10-04", docsUntil("2026-10-04", { "photos/2026-10-04": { profilD: { id: "x" } } })).messages.map((m) => m.tag).join() === "measures", "photos déjà prises → mensurations seules");
-ok(!run("measures", "2026-10-04", null, { "measures:2026-10-04": "2026-10-04", "photos:2026-10-04": "2026-10-04" }).messages.length, "déjà envoyées aujourd'hui → rien");
+ok(r.logKeys.join() === "measures:2026-10-04,photos:2026-10-04,courses:2026-10-04", "journal : une clé par notification", r.logKeys);
+ok(run("measures", "2026-10-04", docsUntil("2026-10-04", { "measurements/2026-10-04": { weight: 70 } })).messages.map((m) => m.tag).join() === "photos,courses", "mensurations déjà saisies → pas de rappel mensurations");
+ok(run("measures", "2026-10-04", docsUntil("2026-10-04", { "photos/2026-10-04": { profilD: { id: "x" } } })).messages.map((m) => m.tag).join() === "measures,courses", "photos déjà prises → pas de rappel photos");
+ok(!run("measures", "2026-10-04", null, { "measures:2026-10-04": "2026-10-04", "photos:2026-10-04": "2026-10-04", "courses:2026-10-04": "2026-10-04" }).messages.length, "déjà envoyées aujourd'hui → rien");
 ok(!run("measures", "2026-10-05").messages.length, "garde-fou : lundi → aucun rappel mensurations / photos");
 r = run("weekly", "2026-10-04");
 ok(r.messages.map((m) => m.tag).join() === "recount", "04/10 21h (1er dimanche) : « Recompte tes boîtes » seul", body(r));

@@ -52,9 +52,9 @@ rows.forEach((r) => {
 console.log("2. Règles");
 ok(D.STOCK.filter((l) => /om[ée]ga/i.test(l.name)).length === 1, "Oméga-3 : une seule ligne de stock");
 ok(line("omega3").takes.map((t) => t.item).join() === "omega1,omega2", "Oméga-3 consommé par omega1 + omega2");
-ok(line("whey").leadTimeDays === 1 && line("whey").unit === "gramme" && line("whey").dosePerDay === 60, "Whey : grammes, 60 g/j, délai 1 j");
-const wheyPlan = D.NUTRITION.meals.flatMap((m) => m.foods).filter((f) => /whey/i.test(f.name)).reduce((a, f) => a + f.grams, 0);
-ok(wheyPlan === 60, `Whey : le plan nutrition totalise ${wheyPlan} g/j (60 attendus)`);
+ok(line("whey").leadTimeDays === 1 && line("whey").unit === "gramme" && line("whey").dosePerDay === 32, "Whey : grammes, 32 g/j (1 mesurette), délai 1 j");
+const wheyPlan = D.NUTRITION.fixed.flatMap((m) => m.foods).filter((f) => /whey/i.test(f.name)).reduce((a, f) => a + f.grams, 0);
+ok(wheyPlan === 32, `Whey : le plan alimentaire totalise ${wheyPlan} g/j (32 attendus)`);
 D.STOCK.filter((l) => !l.food).forEach((l) => { const q = l.takes.reduce((a, t) => a + t.qty, 0); ok(Math.abs(q - l.dosePerDay) < 1e-9, `${l.name} : cases = ${q}/j ≠ dose ${l.dosePerDay}`); });
 const itemIds = new Set(D.SUPPLEMENTS.items.map((i) => i.id));
 D.STOCK.forEach((l) => l.takes.forEach((t) => ok(itemIds.has(t.item), `${l.name} : case inconnue ${t.item}`)));
@@ -137,8 +137,13 @@ ok(ci.on && ci.stop === "2027-02-15", "Boron le 21/12 : reprise, prochaine pause
 ok(!S.cycleInfo(cyc("zinc"), "2026-11-10").cycled && S.cycleInfo(cyc("zinc"), "2026-11-10").on, "non cyclé : toujours ON");
 ok(S.cycleInfo({ ...cyc("rhodiola"), cycleEnabled: false }, "2026-11-10").on, "cycle désactivé : toujours ON");
 // Whey via repas validés
-const nut = { "2026-09-27": { meals: { m1: { eaten: true }, m2: { eaten: true, foods: [{ name: "Whey ISO100", grams: 45 }] } } } };
-ok(S.status(line("whey"), TODAY, ctxWith({}, nut)).unitsLeft === 2100 - 30 - 45, "whey : grammes réels des repas validés");
+const nut = { "2026-09-27": { meals: { shake: { eaten: true }, midi: { eaten: true, dishId: "teriyaki" }, m2: { eaten: true, foods: [{ name: "Whey ISO100", grams: 45 }] }, soir: { eaten: false, foods: [{ name: "Whey", grams: 99 }] } } } };
+ok(S.status(line("whey"), TODAY, ctxWith({}, nut)).unitsLeft === 2100 - 32 - 45, "whey : shake coché (32 g du plan) + aliments copiés dans le journal, repas non cochés ignorés");
+nut["2026-09-27"].meals.shake.eaten = false;
+ok(S.status(line("whey"), TODAY, ctxWith({}, nut)).unitsLeft === 2100 - 45, "whey : décocher le shake rend la dose");
+// Ancien format (plan.meals, journaux m1 / m2 sans copie des aliments) : toujours décompté
+const oldPlan = { meals: [{ id: "m1", foods: [{ name: "Whey ISO100", grams: 30 }] }, { id: "m2", foods: [{ name: "Whey ISO100", grams: 30 }] }] };
+ok(S.status(line("whey"), TODAY, { ...ctxWith({}, { "2026-09-27": { meals: { m1: { eaten: true }, m2: { eaten: true } } } }), nutPlan: oldPlan }).unitsLeft === 2040, "whey : ancien plan et anciens journaux toujours lus");
 ok(S.status(line("probio"), TODAY, ctx0).ordered, "probiotiques importés comme déjà recommandés");
 
 console.log("4. Pilulier (semaine du 12/10 au 18/10 déjà sortie des boîtes, décompte à partir du 19/10)");
